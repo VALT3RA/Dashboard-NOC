@@ -1,0 +1,828 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { format, subMonths } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import {
+  DashboardMetrics,
+  GroupMetricsApiResponse,
+  HostGroupMetric,
+  HostGroupOption,
+  SeveritySummary,
+} from "@/types/dashboard";
+import { SeverityTable } from "@/components/severity-table";
+
+const MONTH_OPTIONS = buildMonthOptions(12);
+const SORT_FIELDS: Array<{
+  label: string;
+  value: GroupSortField;
+}> = [
+  { label: "Nome", value: "name" },
+  { label: "Alertas", value: "alerts" },
+  { label: "Alertas em aberto", value: "openAlerts" },
+  { label: "Detecção", value: "detection" },
+  { label: "Resposta", value: "response" },
+  { label: "Resolução", value: "resolution" },
+  { label: "Disponibilidade", value: "availability" },
+  { label: "Disponibilidade (9h-18h)", value: "availabilityBusiness" },
+];
+const HOST_SORT_FIELDS: Array<{ label: string; value: HostSortField }> = [
+  { label: "Nome", value: "name" },
+  { label: "Alertas", value: "alerts" },
+  { label: "Alertas em aberto", value: "openAlerts" },
+  { label: "Detecção", value: "detection" },
+  { label: "Resposta", value: "response" },
+  { label: "Resolução", value: "resolution" },
+  { label: "Disponibilidade", value: "availability" },
+  { label: "Disponibilidade (9h-18h)", value: "availabilityBusiness" },
+];
+
+export function GlobalOverview() {
+  const [month, setMonth] = useState(MONTH_OPTIONS[0]?.value ?? "");
+  const [hostGroups, setHostGroups] = useState<HostGroupOption[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState("");
+  const [groupData, setGroupData] = useState<GroupMetricsApiResponse | null>(
+    null
+  );
+  const [singleGroupData, setSingleGroupData] =
+    useState<DashboardMetrics | null>(null);
+  const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState<GroupSortField>("name");
+  const [hostSortField, setHostSortField] = useState<HostSortField>("name");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/host-groups")
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Não foi possível carregar os host groups.");
+        }
+        const payload = (await response.json()) as {
+          groups: HostGroupOption[];
+        };
+        setHostGroups(
+          payload.groups.filter((group) => {
+            const name = group.name.toLowerCase();
+            return (
+              !name.includes("templates") &&
+              !name.startsWith("test") &&
+              name !== "discovered hosts"
+            );
+          })
+        );
+      })
+      .catch((err) => {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Falha ao carregar lista de host groups."
+        );
+      });
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+
+    async function loadMetrics() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const endpoint = selectedGroup
+          ? `/api/metrics?month=${month}&groupId=${selectedGroup}`
+          : `/api/group-metrics?month=${month}`;
+        const response = await fetch(endpoint, {
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          const message = await extractError(response);
+          throw new Error(message);
+        }
+        if (!active) return;
+
+        if (selectedGroup) {
+          const payload = (await response.json()) as {
+            metrics: DashboardMetrics;
+          };
+          setSingleGroupData(payload.metrics);
+          setGroupData(null);
+        } else {
+          const payload = (await response.json()) as GroupMetricsApiResponse;
+          setGroupData(payload);
+          setSingleGroupData(null);
+        }
+      } catch (err) {
+        if (!active || controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Falha ao carregar dados.");
+        setGroupData(null);
+        setSingleGroupData(null);
+      } finally {
+        if (active && !controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadMetrics();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [month, selectedGroup]);
+
+  const filteredGroups = useMemo(() => {
+    if (!groupData) return [];
+    const query = search.toLowerCase();
+    const base = search.trim()
+      ? groupData.groups.filter((group) =>
+          group.name.toLowerCase().includes(query)
+        )
+      : groupData.groups;
+    return [...base].sort((a, b) =>
+      compareGroupMetrics(a, b, sortField, sortOrder)
+    );
+  }, [groupData, search, sortField, sortOrder]);
+  const filteredHosts = useMemo(() => {
+    if (!singleGroupData) return [];
+    return [...singleGroupData.hosts].sort((a, b) =>
+      compareHostMetrics(a, b, hostSortField, sortOrder)
+    );
+  }, [singleGroupData, hostSortField, sortOrder]);
+
+  const selectedGroupName =
+    hostGroups.find((group) => group.groupid === selectedGroup)?.name ?? "";
+  const isSingleGroupMode = Boolean(selectedGroup && singleGroupData);
+  const filteredSummary = useMemo(() => {
+    if (isSingleGroupMode || !groupData) return null;
+    if (!search.trim()) return null;
+    const groups = filteredGroups;
+    if (!groups.length) return null;
+    const activeUnion = new Set<string>();
+    const inactiveUnion = new Set<string>();
+    for (const group of groups) {
+      group.hostIds.forEach((id) => activeUnion.add(id));
+      group.inactiveHostIds?.forEach((id) => inactiveUnion.add(id));
+    }
+    const sumAlerts = groups.reduce((acc, group) => acc + group.alerts, 0);
+    const sumOpenAlerts = groups.reduce(
+      (acc, group) => acc + group.openAlerts,
+      0
+    );
+    const severityUnion = new Map<number, { label: string; count: number }>();
+    groups.forEach((group) =>
+      group.severitySummary?.forEach((item) => {
+        const existing = severityUnion.get(item.severity);
+        severityUnion.set(item.severity, {
+          label: item.label,
+          count: (existing?.count ?? 0) + item.count,
+        });
+      })
+    );
+    const severitySummary = Array.from(severityUnion.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([severity, info]) => ({
+        severity,
+        label: info.label,
+        count: info.count,
+      }));
+    const detectionWeight = groups.reduce(
+      (acc, group) => acc + (group.alerts || 0),
+      0
+    );
+    const availabilityWeight = groups.reduce(
+      (acc, group) => acc + (group.hosts || 0),
+      0
+    );
+    const detection =
+      detectionWeight > 0
+        ? groups.reduce(
+            (acc, group) => acc + (group.detectionMinutes || 0) * (group.alerts || 0),
+            0
+          ) / detectionWeight
+        : 0;
+    const response =
+      detectionWeight > 0
+        ? groups.reduce(
+            (acc, group) => acc + (group.responseMinutes || 0) * (group.alerts || 0),
+            0
+          ) / detectionWeight
+        : 0;
+    const resolution =
+      detectionWeight > 0
+        ? groups.reduce(
+            (acc, group) =>
+              acc + (group.resolutionMinutes || 0) * (group.alerts || 0),
+            0
+          ) / detectionWeight
+        : 0;
+    const availability =
+      availabilityWeight > 0
+        ? groups.reduce(
+            (acc, group) =>
+              acc + (group.availabilityPct || 0) * (group.hosts || 0),
+            0
+          ) / availabilityWeight
+        : 0;
+    const businessAvailability =
+      availabilityWeight > 0
+        ? groups.reduce(
+            (acc, group) =>
+              acc +
+              (group.businessAvailabilityPct || 0) * (group.hosts || 0),
+            0
+          ) / availabilityWeight
+        : 0;
+
+    return {
+      alerts: sumAlerts,
+      openAlerts: sumOpenAlerts,
+      hosts: activeUnion.size,
+      inactiveHosts: inactiveUnion.size,
+      severitySummary,
+      detection,
+      response,
+      resolution,
+      availability,
+      businessAvailability,
+    };
+  }, [filteredGroups, isSingleGroupMode, groupData, search]);
+
+  const cardSource = isSingleGroupMode
+    ? {
+        alerts: singleGroupData?.groupTotals.alerts ?? 0,
+        openAlerts: singleGroupData?.groupTotals.openAlerts ?? 0,
+        hosts: singleGroupData?.groupTotals.hostCount ?? 0,
+        inactiveHosts: singleGroupData?.groupTotals.inactiveHosts ?? 0,
+        detection: singleGroupData?.kpis.detectionMinutes ?? 0,
+        response: singleGroupData?.kpis.responseMinutes ?? 0,
+        resolution: singleGroupData?.kpis.resolutionMinutes ?? 0,
+        availability: singleGroupData?.kpis.availabilityPct ?? 100,
+        businessAvailability: singleGroupData?.availability.businessPct ?? 100,
+      }
+    : filteredSummary ?? {
+        alerts: groupData?.totals.alerts ?? 0,
+        openAlerts: groupData?.totals.openAlerts ?? 0,
+        hosts: groupData?.totals.hostCount ?? 0,
+        inactiveHosts: groupData?.totals.inactiveHosts ?? 0,
+        detection: groupData?.kpis.detectionMinutes ?? 0,
+        response: groupData?.kpis.responseMinutes ?? 0,
+        resolution: groupData?.kpis.resolutionMinutes ?? 0,
+        availability: groupData?.kpis.availabilityPct ?? 100,
+        businessAvailability: groupData?.availability.businessPct ?? 100,
+      };
+
+  return (
+    <section className="space-y-8 rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+      <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
+            Contego Security · Visão Geral
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold text-slate-900">
+            Indicadores Globais de Host Groups
+          </h1>
+          <p className="text-sm text-slate-500">
+            Alertas, tempos médios e disponibilidade por cliente/host group.
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+          <label className="flex flex-col text-sm font-medium text-slate-600">
+            Mês analisado
+            <select
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+              className="mt-2 h-11 rounded-2xl border border-slate-200 bg-white px-4 text-base font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              {MONTH_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col text-sm font-medium text-slate-600">
+            Cliente / Host Group
+            <select
+              value={selectedGroup}
+              onChange={(event) => setSelectedGroup(event.target.value)}
+              className="mt-2 h-11 rounded-2xl border border-slate-200 bg-white px-4 text-base font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="">Todos os clientes</option>
+              {hostGroups.map((group) => (
+                <option key={group.groupid} value={group.groupid}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col text-sm font-medium text-slate-600 lg:col-span-2">
+            Filtrar host group
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="mt-2 h-11 rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              placeholder="Buscar host group..."
+            />
+          </label>
+          <label className="flex flex-col text-sm font-medium text-slate-600">
+            Ordenar por
+            <select
+              value={isSingleGroupMode ? hostSortField : sortField}
+              onChange={(event) =>
+                isSingleGroupMode
+                  ? setHostSortField(event.target.value as HostSortField)
+                  : setSortField(event.target.value as GroupSortField)
+              }
+              className="mt-2 h-11 rounded-2xl border border-slate-200 bg-white px-4 text-base font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              {(isSingleGroupMode ? HOST_SORT_FIELDS : SORT_FIELDS).map(
+                (option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                )
+              )}
+            </select>
+          </label>
+          <label className="flex flex-col text-sm font-medium text-slate-600">
+            Ordem
+            <select
+              value={sortOrder}
+              onChange={(event) => setSortOrder(event.target.value as SortOrder)}
+              className="mt-2 h-11 rounded-2xl border border-slate-200 bg-white px-3 text-base font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="asc">Asc</option>
+              <option value="desc">Desc</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+        {(groupData || singleGroupData) && (
+          <>
+            <span className="rounded-2xl bg-slate-100 px-4 py-2">
+              Período:{" "}
+              <strong className="text-slate-700">
+                {groupData?.meta.period ??
+                  singleGroupData?.meta.period ??
+                  ""}
+              </strong>
+            </span>
+            <span className="rounded-2xl bg-slate-100 px-4 py-2">
+              Atualizado em:{" "}
+              <strong className="text-slate-700">
+                {format(
+                  new Date(
+                    groupData?.meta.generatedAt ??
+                      singleGroupData?.meta.generatedAt ??
+                      new Date().toISOString()
+                  ),
+                  "dd/MM/yyyy HH:mm"
+                )}
+              </strong>
+            </span>
+            {isSingleGroupMode && (
+              <span className="rounded-2xl bg-blue-50 px-4 py-2 text-blue-700">
+                Host group selecionado: {selectedGroupName}
+              </span>
+            )}
+          </>
+        )}
+        <Link
+          href="/cap-switches"
+          className="ml-auto inline-flex items-center rounded-2xl bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700"
+        >
+          Ver CAP-switches
+        </Link>
+      </div>
+
+      <OverviewCards
+        loading={loading}
+        source={cardSource}
+        title={isSingleGroupMode ? selectedGroupName : "Todos os clientes"}
+      />
+
+      {error && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-600">
+          {error}
+        </div>
+      )}
+
+      {isSingleGroupMode ? (
+        <HostTable rows={filteredHosts} loading={loading} />
+      ) : (
+        <GroupTable rows={filteredGroups} loading={loading} />
+      )}
+    </section>
+  );
+}
+
+function OverviewCards({
+  loading,
+  source,
+  title,
+}: {
+  loading: boolean;
+  source: {
+    alerts: number;
+    openAlerts: number;
+    hosts: number;
+    inactiveHosts: number;
+    hosts: number;
+    detection: number;
+    response: number;
+    resolution: number;
+    availability: number;
+    businessAvailability: number;
+  };
+  title: string;
+}) {
+  const cards = [
+    {
+      label: "Hosts monitorados (ativos)",
+      value: source.hosts.toLocaleString("pt-BR"),
+    },
+    {
+      label: "Hosts inativos",
+      value: source.inactiveHosts.toLocaleString("pt-BR"),
+      accent: source.inactiveHosts ? "text-rose-600" : "text-slate-900",
+      status: source.inactiveHosts
+        ? `${source.inactiveHosts.toLocaleString("pt-BR")} inativos`
+        : "Todos ativos",
+    },
+    {
+      label: `Alertas (${title})`,
+      value: source.alerts.toLocaleString("pt-BR"),
+    },
+    {
+      label: "Alertas em aberto",
+      value: source.openAlerts.toLocaleString("pt-BR"),
+      accent: "text-rose-600",
+    },
+    {
+      label: "Tempo médio de detecção",
+      value: formatMinutes(source.detection),
+      suffix: "min",
+    },
+    {
+      label: "Tempo médio de resposta",
+      value: formatMinutes(source.response),
+      suffix: "min",
+    },
+    {
+      label: "Tempo médio de resolução",
+      value: formatMinutes(source.resolution),
+      suffix: "min",
+    },
+    {
+      label: "Disponibilidade geral",
+      value: `${source.availability.toFixed(2)}%`,
+      accent:
+        source.availability < 99 ? "text-rose-600" : "text-emerald-600",
+      status:
+        source.availability < 99 ? "Abaixo da meta" : "Dentro da meta",
+    },
+    {
+      label: "Disponibilidade (9h-18h)",
+      value: `${source.businessAvailability.toFixed(2)}%`,
+      accent:
+        source.businessAvailability < 99
+          ? "text-rose-600"
+          : "text-emerald-600",
+      status:
+        source.businessAvailability < 99
+          ? "Abaixo da meta"
+          : "Dentro da meta",
+    },
+  ];
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {cards.map((card) => (
+        <div
+          key={card.label}
+          className="rounded-3xl border border-slate-100 bg-slate-50/80 px-5 py-4 shadow-sm"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {card.label}
+          </p>
+          <div className="mt-3 flex items-baseline gap-2">
+            <div className="flex items-baseline gap-2">
+              <span
+                className={`text-4xl font-semibold tracking-tight ${
+                  card.accent ?? "text-slate-900"
+                }`}
+              >
+                {loading ? "" : card.value}
+              </span>
+              {card.suffix && (
+                <span className="text-sm font-medium text-slate-500">
+                  {card.suffix}
+                </span>
+              )}
+            </div>
+          </div>
+          {card.status && (
+            <span
+              className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                card.accent?.includes("rose")
+                  ? "bg-rose-50 text-rose-600"
+                  : "bg-emerald-50 text-emerald-600"
+              }`}
+            >
+              {card.status}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GroupTable({
+  rows,
+  loading,
+}: {
+  rows: HostGroupMetric[];
+  loading: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-100">
+      <table className="min-w-full divide-y divide-slate-100 text-sm">
+        <thead className="bg-slate-50 text-slate-600">
+          <tr>
+            <th className="px-4 py-3 text-left font-semibold">Host group</th>
+            <th className="px-4 py-3 text-right font-semibold">Hosts</th>
+            <th className="px-4 py-3 text-right font-semibold">Alertas</th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Alertas em aberto
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Detecção (min)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Resposta (min)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Resolução (min)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Disponibilidade (%)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Disponibilidade (9h-18h)
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 bg-white text-slate-800">
+          {loading && (
+            <tr>
+              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
+                Carregando métricas...
+              </td>
+            </tr>
+          )}
+          {!loading && rows.length === 0 && (
+            <tr>
+              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
+                Nenhum host group encontrado.
+              </td>
+            </tr>
+          )}
+          {!loading &&
+            rows.map((group) => (
+              <tr key={group.groupid}>
+                <td className="px-4 py-3 font-semibold">{group.name}</td>
+                <td className="px-4 py-3 text-right">{group.hosts}</td>
+                <td className="px-4 py-3 text-right">{group.alerts}</td>
+                <td className="px-4 py-3 text-right">{group.openAlerts}</td>
+                <td className="px-4 py-3 text-right">
+                  {formatMinutes(group.detectionMinutes)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {formatMinutes(group.responseMinutes)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {formatMinutes(group.resolutionMinutes)}
+                </td>
+                <td
+                  className={`px-4 py-3 text-right ${
+                    group.availabilityPct < 99
+                      ? "text-rose-600"
+                      : "text-emerald-600"
+                  }`}
+                >
+                  {group.availabilityPct.toFixed(2)}%
+                </td>
+                <td
+                  className={`px-4 py-3 text-right ${
+                    group.businessAvailabilityPct < 99
+                      ? "text-rose-600"
+                      : "text-emerald-600"
+                  }`}
+                >
+                  {group.businessAvailabilityPct.toFixed(2)}%
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function HostTable({
+  rows,
+  loading,
+}: {
+  rows: DashboardMetrics["hosts"];
+  loading: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-100">
+      <table className="min-w-full divide-y divide-slate-100 text-sm">
+        <thead className="bg-slate-50 text-slate-600">
+          <tr>
+            <th className="px-4 py-3 text-left font-semibold">Host</th>
+            <th className="px-4 py-3 text-right font-semibold">Alertas</th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Alertas em aberto
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Detecção (min)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Resposta (min)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Resolução (min)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Disponibilidade (%)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Disponibilidade (9h-18h)
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 bg-white text-slate-800">
+          {loading && (
+            <tr>
+              <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
+                Carregando métricas...
+              </td>
+            </tr>
+          )}
+          {!loading && rows.length === 0 && (
+            <tr>
+              <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
+                Nenhum host encontrado.
+              </td>
+            </tr>
+          )}
+          {!loading &&
+             rows.map((host) => (
+               <tr key={host.hostid}>
+                <td className="px-4 py-3 font-semibold">{host.name}</td>
+                <td className="px-4 py-3 text-right">{host.eventCount}</td>
+                <td className="px-4 py-3 text-right">{host.openEventCount}</td>
+                <td className="px-4 py-3 text-right">
+                  {formatMinutes(host.detectionMinutes)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {formatMinutes(host.responseMinutes)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {formatMinutes(host.resolutionMinutes)}
+                </td>
+                <td
+                  className={`px-4 py-3 text-right ${
+                    host.availabilityPct < 99
+                      ? "text-rose-600"
+                      : "text-emerald-600"
+                  }`}
+                >
+                  {host.availabilityPct.toFixed(2)}%
+                </td>
+                <td
+                  className={`px-4 py-3 text-right ${
+                    host.businessAvailabilityPct < 99
+                      ? "text-rose-600"
+                      : "text-emerald-600"
+                  }`}
+                >
+                  {host.businessAvailabilityPct.toFixed(2)}%
+                </td>
+               </tr>
+             ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatMinutes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (value < 1) {
+    return `${(value * 60).toFixed(0)}s`;
+  }
+  return value.toFixed(1);
+}
+
+function buildMonthOptions(length: number) {
+  return Array.from({ length }, (_, index) => {
+    const date = subMonths(new Date(), index);
+    const label = format(date, "MMMM yyyy", { locale: ptBR });
+    return {
+      value: format(date, "yyyy-MM"),
+      label: label.charAt(0).toUpperCase() + label.slice(1),
+    };
+  });
+}
+
+async function extractError(response: Response) {
+  try {
+    const data = await response.json();
+    return data.error ?? response.statusText;
+  } catch {
+    return response.statusText;
+  }
+}
+
+type SortOrder = "asc" | "desc";
+type GroupSortField =
+  | "name"
+  | "alerts"
+  | "openAlerts"
+  | "detection"
+  | "response"
+  | "resolution"
+  | "availability"
+  | "availabilityBusiness";
+type HostSortField = GroupSortField;
+
+function compareGroupMetrics(
+  a: HostGroupMetric,
+  b: HostGroupMetric,
+  field: GroupSortField,
+  order: SortOrder
+) {
+  const multiplier = order === "asc" ? 1 : -1;
+  switch (field) {
+    case "name":
+      return multiplier * a.name.localeCompare(b.name, "pt-BR");
+    case "alerts":
+      return multiplier * (a.alerts - b.alerts);
+    case "openAlerts":
+      return multiplier * (a.openAlerts - b.openAlerts);
+    case "detection":
+      return multiplier * (a.detectionMinutes - b.detectionMinutes);
+    case "response":
+      return multiplier * (a.responseMinutes - b.responseMinutes);
+    case "resolution":
+      return multiplier * (a.resolutionMinutes - b.resolutionMinutes);
+    case "availability":
+      return multiplier * (a.availabilityPct - b.availabilityPct);
+    case "availabilityBusiness":
+      return multiplier * (a.businessAvailabilityPct - b.businessAvailabilityPct);
+    default:
+      return 0;
+  }
+}
+
+function compareHostMetrics(
+  a: DashboardMetrics["hosts"][number],
+  b: DashboardMetrics["hosts"][number],
+  field: HostSortField,
+  order: SortOrder
+) {
+  const multiplier = order === "asc" ? 1 : -1;
+  switch (field) {
+    case "name":
+      return multiplier * a.name.localeCompare(b.name, "pt-BR");
+    case "alerts":
+      return multiplier * (a.eventCount - b.eventCount);
+    case "openAlerts":
+      return multiplier * (a.openEventCount - b.openEventCount);
+    case "detection":
+      return multiplier * (a.detectionMinutes - b.detectionMinutes);
+    case "response":
+      return multiplier * (a.responseMinutes - b.responseMinutes);
+    case "resolution":
+      return multiplier * (a.resolutionMinutes - b.resolutionMinutes);
+    case "availability":
+      return multiplier * (a.availabilityPct - b.availabilityPct);
+    case "availabilityBusiness":
+      return (
+        multiplier *
+        (a.businessAvailabilityPct - b.businessAvailabilityPct)
+      );
+    default:
+      return 0;
+  }
+}

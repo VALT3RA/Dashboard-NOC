@@ -15,15 +15,15 @@ import {
   SeveritySummary,
 } from "@/types/dashboard";
 import { SeverityTable } from "@/components/severity-table";
+import { sumContractedHostsByName } from "@/lib/contracted-hosts";
 
 const MONTH_OPTIONS = buildMonthOptions(12);
 const SORT_FIELDS: Array<{ label: string; value: GroupSortField }> = [
   { label: "Nome", value: "name" },
   { label: "Alertas", value: "alerts" },
   { label: "Alertas em aberto", value: "openAlerts" },
-  { label: "Detecção", value: "detection" },
-  { label: "Resposta", value: "response" },
-  { label: "Resolução", value: "resolution" },
+  { label: "Tempo de resposta (1o ACK)", value: "detection" },
+  { label: "Resolucao", value: "resolution" },
   { label: "Disponibilidade", value: "availability" },
   { label: "Disponibilidade (7h-23:59)", value: "availabilityBusiness" },
 ];
@@ -31,9 +31,8 @@ const HOST_SORT_FIELDS: Array<{ label: string; value: HostSortField }> = [
   { label: "Nome", value: "name" },
   { label: "Alertas", value: "alerts" },
   { label: "Alertas em aberto", value: "openAlerts" },
-  { label: "Detecção", value: "detection" },
-  { label: "Resposta", value: "response" },
-  { label: "Resolução", value: "resolution" },
+  { label: "Tempo de resposta (1o ACK)", value: "detection" },
+  { label: "Resolucao", value: "resolution" },
   { label: "Disponibilidade", value: "availability" },
   { label: "Disponibilidade (7h-23:59)", value: "availabilityBusiness" },
 ];
@@ -44,10 +43,10 @@ type OverviewCardSource = {
   hosts: number;
   inactiveHosts: number;
   detection: number;
-  response: number;
   resolution: number;
   availability: number;
   businessAvailability: number;
+  contractedHosts: number | null;
 };
 
 const EMPTY_SOURCE: OverviewCardSource = {
@@ -56,10 +55,10 @@ const EMPTY_SOURCE: OverviewCardSource = {
   hosts: 0,
   inactiveHosts: 0,
   detection: 0,
-  response: 0,
   resolution: 0,
   availability: 0,
   businessAvailability: 0,
+  contractedHosts: null,
 };
 
 const FILTER_LABEL_CLASS = "flex flex-col text-xs font-semibold text-slate-600";
@@ -393,6 +392,18 @@ export function GlobalOverview() {
 
     : comparisonSummarySource ?? comparisonTotalsSource ?? null;
 
+  const contractedHosts = sumContractedHostsByName(selectedGroupNames);
+  const adjustedCardSource: OverviewCardSource = {
+    ...(cardSource ?? EMPTY_SOURCE),
+    contractedHosts,
+  };
+  const adjustedComparisonCardSource = comparisonCardSource
+    ? {
+        ...comparisonCardSource,
+        contractedHosts,
+      }
+    : null;
+
 
 
   const severitySummaryData = isSingleGroupMode
@@ -596,9 +607,11 @@ export function GlobalOverview() {
 
       <OverviewCards
         loading={loading}
-        source={cardSource}
-        comparison={comparisonCardSource}
+        source={adjustedCardSource}
+        comparison={adjustedComparisonCardSource}
         title={overviewTitle}
+        month={month}
+        selectedGroups={selectedGroups}
         selectedGroupNames={selectedGroupNames}
       />
 
@@ -672,8 +685,9 @@ function DisasterAlertHighlights({
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Abertura</th>
                   <th className="px-4 py-3">Encerramento</th>
-                  <th className="px-4 py-3 text-right">Detecção (min)</th>
-                  <th className="px-4 py-3 text-right">Resposta (min)</th>
+                  <th className="px-4 py-3 text-right">
+                    Tempo de resposta (1o ACK)
+                  </th>
                   <th className="px-4 py-3 text-right">Resolução (min)</th>
                 </tr>
               </thead>
@@ -711,9 +725,6 @@ function DisasterAlertHighlights({
                     </td>
                     <td className="px-4 py-3 text-right text-base font-semibold text-slate-900">
                       {formatMinutesOrDash(alert.detectionMinutes)}
-                    </td>
-                    <td className="px-4 py-3 text-right text-base font-semibold text-slate-900">
-                      {formatMinutesOrDash(alert.responseMinutes)}
                     </td>
                     <td className="px-4 py-3 text-right text-base font-semibold text-slate-900">
                       {formatMinutesOrDash(alert.resolutionMinutes)}
@@ -758,7 +769,7 @@ const SECTION_LAYOUTS: Record<KpiSectionKey, { title: string; grid: string }> = 
   },
   operations: {
     title: "Performance operacional",
-    grid: "grid-cols-1 gap-4 md:grid-cols-3",
+    grid: "grid-cols-1 gap-4 md:grid-cols-2",
   },
 };
 
@@ -819,32 +830,22 @@ const CARD_DEFINITIONS: CardDefinition[] = [
   {
     id: "detection",
     section: "operations",
-    title: "Tempo médio de detecção",
+    title: "Tempo medio de resposta (1o ACK)",
     unit: "minutes",
     target: 5,
     warnMargin: 2,
     betterDirection: "lower",
-    description: "Minutos (média dos últimos 30 dias)",
-  },
-  {
-    id: "response",
-    section: "operations",
-    title: "Tempo médio de resposta",
-    unit: "minutes",
-    target: 15,
-    warnMargin: 5,
-    betterDirection: "lower",
-    description: "Minutos (média dos últimos 30 dias)",
+    description: "Minutos (media dos ultimos 30 dias)",
   },
   {
     id: "resolution",
     section: "operations",
-    title: "Tempo médio de resolução",
+    title: "Tempo medio de resolucao",
     unit: "minutes",
     target: 60,
     warnMargin: 15,
     betterDirection: "lower",
-    description: "Minutos (média dos últimos 30 dias)",
+    description: "Minutos (media dos ultimos 30 dias)",
   },
 ];
 
@@ -966,12 +967,16 @@ function OverviewCards({
   source,
   comparison,
   title,
+  month,
+  selectedGroups,
   selectedGroupNames,
 }: {
   loading: boolean;
   source: OverviewCardSource;
   comparison: OverviewCardSource | null;
   title: string;
+  month: string;
+  selectedGroups: string[];
   selectedGroupNames: string[];
 }) {
   const [showOpenAlerts, setShowOpenAlerts] = useState(false);
@@ -1043,6 +1048,36 @@ function OverviewCards({
               const status = buildCardStatus(definition, value, previousValue);
               const trend = buildTrendText(definition, value, previousValue);
               const isOpenAlertsCard = definition.id === "openAlerts";
+              const contracted =
+                definition.id === "hosts" ? source.contractedHosts : null;
+              let contractedBadge: JSX.Element | null = null;
+              if (
+                definition.id === "hosts" &&
+                contracted !== null &&
+                Number.isFinite(contracted)
+              ) {
+                const delta = source.hosts - contracted;
+                const labelStatus =
+                  delta < 0
+                    ? "Abaixo do contratado"
+                    : delta === 0
+                    ? "Dentro do contratado"
+                    : "Acima do contratado";
+                const badgeClass =
+                  delta < 0
+                    ? BADGE_STYLES.danger
+                    : delta === 0
+                    ? BADGE_STYLES.success
+                    : BADGE_STYLES.warning;
+                contractedBadge = (
+                  <span
+                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold ${badgeClass}`}
+                  >
+                    {labelStatus} ({source.hosts.toLocaleString("pt-BR")}/
+                    {contracted.toLocaleString("pt-BR")})
+                  </span>
+                );
+              }
               const cardContent = (
                 <div
                   key={definition.id}
@@ -1062,12 +1097,32 @@ function OverviewCards({
                   <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
                     {status && (
                       <span
-                        className={`rounded-full px-3 py-1 ${BADGE_STYLES[status.tone]}`}>
+                        className={`inline-flex rounded-full px-3 py-1 ${BADGE_STYLES[status.tone]}`}
+                      >
                         {status.label}
                       </span>
                     )}
-                    {trend && <span>{trend}</span>}
+                    {trend && (
+                      <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
+                        {trend}
+                      </span>
+                    )}
+                    {contractedBadge}
                   </div>
+                  {definition.id === "resolution" && (
+                    <div className="mt-4">
+                      <Link
+                        href={`/reports/slow-resolutions?month=${month}${
+                          selectedGroups.length
+                            ? `&groupIds=${selectedGroups.join(",")}`
+                            : ""
+                        }`}
+                        className="inline-flex items-center rounded-2xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      >
+                        Ver alertas com maior tempo de resolução
+                      </Link>
+                    </div>
+                  )}
                 </div>
               );
 
@@ -1124,10 +1179,7 @@ function GroupTable({
               Alertas em aberto
             </th>
             <th className="px-4 py-3 text-right font-semibold">
-              Detecção (min)
-            </th>
-            <th className="px-4 py-3 text-right font-semibold">
-              Resposta (min)
+              Tempo de resposta (1o ACK)
             </th>
             <th className="px-4 py-3 text-right font-semibold">
               Resolução (min)
@@ -1143,14 +1195,14 @@ function GroupTable({
         <tbody className="divide-y divide-slate-100 bg-white text-slate-800">
           {loading && (
             <tr>
-              <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
+              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
                 Carregando métricas...
               </td>
             </tr>
           )}
           {!loading && rows.length === 0 && (
             <tr>
-              <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
+              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
                 Nenhum host group encontrado.
               </td>
             </tr>
@@ -1165,9 +1217,6 @@ function GroupTable({
                 <td className="px-4 py-3 text-right">{group.openAlerts}</td>
                 <td className="px-4 py-3 text-right">
                   {formatMinutes(group.detectionMinutes)}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {formatMinutes(group.responseMinutes)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {formatMinutes(group.resolutionMinutes)}
@@ -1216,10 +1265,7 @@ function HostTable({
               Alertas em aberto
             </th>
             <th className="px-4 py-3 text-right font-semibold">
-              Detecção (min)
-            </th>
-            <th className="px-4 py-3 text-right font-semibold">
-              Resposta (min)
+              Tempo de resposta (1o ACK)
             </th>
             <th className="px-4 py-3 text-right font-semibold">
               Resolução (min)
@@ -1235,14 +1281,14 @@ function HostTable({
         <tbody className="divide-y divide-slate-100 bg-white text-slate-800">
           {loading && (
             <tr>
-              <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
+              <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
                 Carregando métricas...
               </td>
             </tr>
           )}
           {!loading && rows.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-4 py-6 text-center text-slate-500">
+              <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
                 Nenhum host encontrado.
               </td>
             </tr>
@@ -1255,9 +1301,6 @@ function HostTable({
                 <td className="px-4 py-3 text-right">{host.openEventCount}</td>
                 <td className="px-4 py-3 text-right">
                   {formatMinutes(host.detectionMinutes)}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {formatMinutes(host.responseMinutes)}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {formatMinutes(host.resolutionMinutes)}
@@ -1368,14 +1411,6 @@ function summarizeHostGroupMetrics(
           0
         ) / detectionWeight
       : 0;
-  const response =
-    detectionWeight > 0
-      ? groups.reduce(
-          (acc, group) =>
-            acc + (group.responseMinutes || 0) * (group.alerts || 0),
-          0
-        ) / detectionWeight
-      : 0;
   const resolution =
     detectionWeight > 0
       ? groups.reduce(
@@ -1409,10 +1444,10 @@ function summarizeHostGroupMetrics(
     inactiveHosts: inactiveUnion.size,
     severitySummary: buildSeveritySummaryFromGroups(groups),
     detection,
-    response,
     resolution,
     availability,
     businessAvailability,
+    contractedHosts: null,
   };
 }
 
@@ -1482,10 +1517,10 @@ function convertSummaryToSource(
     hosts: summary.hosts,
     inactiveHosts: summary.inactiveHosts,
     detection: summary.detection,
-    response: summary.response,
     resolution: summary.resolution,
     availability: summary.availability,
     businessAvailability: summary.businessAvailability,
+    contractedHosts: summary.contractedHosts ?? null,
   };
 }
 
@@ -1499,10 +1534,10 @@ function convertTotalsToSource(
     hosts: data.totals.hostCount ?? 0,
     inactiveHosts: data.totals.inactiveHosts ?? 0,
     detection: data.kpis.detectionMinutes ?? 0,
-    response: data.kpis.responseMinutes ?? 0,
     resolution: data.kpis.resolutionMinutes ?? 0,
     availability: data.kpis.availabilityPct ?? 0,
     businessAvailability: data.availability.businessPct ?? 0,
+    contractedHosts: null,
   };
 }
 
@@ -1516,10 +1551,10 @@ function convertSingleToSource(
     hosts: data.groupTotals.hostCount ?? 0,
     inactiveHosts: data.groupTotals.inactiveHosts ?? 0,
     detection: data.kpis.detectionMinutes ?? 0,
-    response: data.kpis.responseMinutes ?? 0,
     resolution: data.kpis.resolutionMinutes ?? 0,
     availability: data.kpis.availabilityPct ?? 0,
     businessAvailability: data.availability.businessPct ?? 0,
+    contractedHosts: null,
   };
 }
 
@@ -1957,7 +1992,6 @@ type GroupSortField =
   | "alerts"
   | "openAlerts"
   | "detection"
-  | "response"
   | "resolution"
   | "availability"
   | "availabilityBusiness";
@@ -1979,8 +2013,6 @@ function compareGroupMetrics(
       return multiplier * (a.openAlerts - b.openAlerts);
     case "detection":
       return multiplier * (a.detectionMinutes - b.detectionMinutes);
-    case "response":
-      return multiplier * (a.responseMinutes - b.responseMinutes);
     case "resolution":
       return multiplier * (a.resolutionMinutes - b.resolutionMinutes);
     case "availability":
@@ -2011,8 +2043,6 @@ function compareHostMetrics(
       return multiplier * (a.openEventCount - b.openEventCount);
     case "detection":
       return multiplier * (a.detectionMinutes - b.detectionMinutes);
-    case "response":
-      return multiplier * (a.responseMinutes - b.responseMinutes);
     case "resolution":
       return multiplier * (a.resolutionMinutes - b.resolutionMinutes);
     case "availability":
@@ -2026,4 +2056,10 @@ function compareHostMetrics(
       return 0;
   }
 }
+
+
+
+
+
+
 

@@ -377,10 +377,7 @@ export async function buildDashboardMetrics(
       const firstAck = Number(acknowledges[0].clock);
       detectionDelta = Math.max(0, firstAck - problemStart);
       detectionDurations.push(detectionDelta);
-      const secondAck = acknowledges[1]
-        ? Number(acknowledges[1].clock)
-        : firstAck;
-      responseDelta = Math.max(0, secondAck - problemStart);
+      responseDelta = detectionDelta;
       responseDurations.push(responseDelta);
     }
 

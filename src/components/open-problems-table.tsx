@@ -116,8 +116,9 @@ export function OpenProblemsTable({ problems, generatedAt }: Props) {
               <th className="px-4 py-3 text-left">Criticidade</th>
               <th className="px-4 py-3 text-left">Abertura</th>
               <th className="px-4 py-3 text-left">Tempo aberto</th>
-              <th className="px-4 py-3 text-left">Detecção</th>
-              <th className="px-4 py-3 text-left">Resposta</th>
+              <th className="px-4 py-3 text-left">
+                Tempo de resposta (1º ACK)
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -181,9 +182,6 @@ export function OpenProblemsTable({ problems, generatedAt }: Props) {
                   </td>
                   <td className="px-4 py-4 align-top text-sm font-semibold text-slate-900">
                     {formatMinutes(problem.detectionMinutes)}
-                  </td>
-                  <td className="px-4 py-4 align-top text-sm font-semibold text-slate-900">
-                    {formatMinutes(problem.responseMinutes)}
                   </td>
                 </tr>
               );

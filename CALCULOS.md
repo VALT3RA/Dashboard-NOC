@@ -10,19 +10,13 @@ Este documento descreve como cada metrica exibida no dashboard do host group **C
 - **Janela comercial**: 07h as 23:59 no fuso `America/Sao_Paulo` (configuravel via `.env.local`).
 - **Passo de integracao para disponibilidade**: 5 minutos (tambem configuravel).
 
-### 2. KPIs de Tempo (Deteccao, Resposta, Resolucao)
+### 2. Tempo de resposta (1º ACK) e Resolucao
 Para cada evento:
 1. **Inicio do problema (`problemStart`)**: `max(clock, inicio do mes)`.
-2. **Termino (`problemEnd`)**:
-   - Se ha `r_eventid`, usamos o `clock` do evento de recuperacao.
-   - Caso contrario, `problemEnd = fim do mes` (o problema continua aberto).
-3. **Acknowledges**:
-   - Ordenamos os ACKs por `clock`.
-   - `firstAck` e o primeiro registro: `detectionDelta = firstAck.clock - problemStart`.
-   - `secondAck` (quando existe) e `responseDelta = secondAck.clock - problemStart`.
-   - Ausencia de ACK mantem a metrica vazia porque o Zabbix nao registrou confirmacao manual.
+2. **Termino (`problemEnd`)**: se ha `r_eventid`, usamos o `clock` do evento de recuperacao; caso contrario, `problemEnd = fim do mes` (o problema permanece aberto).
+3. **Tempo de resposta**: se existir pelo menos um ACK, usamos o primeiro ACK. `responseDelta = firstAck.clock - problemStart`. Esse delta alimenta as medias de hosts, grupos e KPIs.
 4. **Resolucao**: `resolutionDelta = problemEnd - problemStart`.
-5. **Valores medios**: guardamos os deltas por host e tambem numa colecao global; ao final convertemos de segundos para minutos e calculamos a media simples.
+5. **Sem ACK**: o evento nao contribui para o tempo de resposta (fica vazio), mas ainda conta para disponibilidade e contagem de alertas.
 
 ### 3. Disponibilidade
 1. **Downtime por host**: para cada evento e cada host envolvido, adicionamos `problemEnd - problemStart` aos acumuladores `total`, `business` (janela comercial) e `off` (fora do expediente). A divisao por horario usa uma integracao em passos de 5 minutos para considerar o fuso horario corretamente.
@@ -41,12 +35,13 @@ Para cada evento:
 Para cada host listado:
 - `eventCount`: numero de eventos que mencionam o host no mes.
 - `openEventCount`: subset desses eventos sem `r_eventid`.
-- `detectionMinutes`, `responseMinutes`, `resolutionMinutes`: medias dos deltas calculados apenas com ACKs existentes para aquele host.
+- `responseMinutes`: media do delta do primeiro ACK em relacao ao inicio do problema.
+- `resolutionMinutes`: media do tempo ate a resolucao (r_eventid ou fim do mes).
 - `availabilityPct` e `businessAvailabilityPct`: formulas descritas na secao 3 aplicadas ao downtime do host (total e janela comercial).
 
 ### 6. Regras de Fallback
-- **Sem ACK**: metricas de deteccao e resposta ficam vazias porque nao ha dado confiavel; ainda assim, o evento conta para os totais de alertas e para a disponibilidade.
-- **Problema sem recuperacao**: e considerado em aberto e o tempo de resolucao cresce ate o fim do mes selecionado.
+- **Sem ACK**: o tempo de resposta fica vazio; ainda assim, o evento conta para alertas e disponibilidade.
+- **Problema sem recuperacao**: considerado em aberto; o tempo de resolucao cresce ate o fim do mes selecionado.
 - **Host sem eventos**: aparece com 0 alertas, 100% de disponibilidade e campos vazios para tempos (pois nao houve incidentes).
 
 ### 7. Variaveis de Ambiente relevantes

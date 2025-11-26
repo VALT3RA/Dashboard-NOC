@@ -97,16 +97,8 @@ function mapProblem(
       : null;
   const firstAckSeconds =
     acknowledges.length > 0 ? Number(acknowledges[0].clock) : null;
-  const responseDelta =
-    acknowledges.length > 1
-      ? Math.max(0, Number(acknowledges[1].clock) - startSeconds)
-      : detectionDelta;
-  const secondAckSeconds =
-    acknowledges.length > 1
-      ? Number(acknowledges[1].clock)
-      : acknowledges.length === 1
-        ? Number(acknowledges[0].clock)
-        : null;
+  const responseDelta = detectionDelta;
+  const secondAckSeconds = firstAckSeconds;
   const resolutionDelta = durationSeconds;
 
   const severity = Number(problem.severity ?? 0);

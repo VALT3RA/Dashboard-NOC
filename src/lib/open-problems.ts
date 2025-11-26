@@ -76,10 +76,7 @@ function mapProblem(
     acknowledges.length > 0
       ? Math.max(0, Number(acknowledges[0].clock) - startSeconds)
       : null;
-  const responseDelta =
-    acknowledges.length > 1
-      ? Math.max(0, Number(acknowledges[1].clock) - startSeconds)
-      : detectionDelta;
+  const responseDelta = detectionDelta;
 
   const severity = Number(problem.severity ?? 0);
   const severityLabel =

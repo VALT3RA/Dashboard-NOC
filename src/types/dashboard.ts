@@ -37,6 +37,7 @@ export type CriticalAlertHighlight = {
   detectionMinutes: number | null;
   responseMinutes: number | null;
   resolutionMinutes: number;
+  businessMinutes: number;
 };
 
 export type OpenProblemDetail = {
@@ -63,6 +64,7 @@ export type HostGroupMetric = {
   name: string;
   hosts: number;
   inactiveHosts: number;
+  impactIncidents: number;
   hostIds: string[];
   inactiveHostIds: string[];
   severitySummary: SeveritySummary[];
@@ -71,6 +73,7 @@ export type HostGroupMetric = {
   eventIds?: string[];
   openEventIds?: string[];
   eventSeverities?: EventSeveritySample[];
+  impactIncidentIds?: string[];
   detectionMinutes: number;
   responseMinutes: number;
   resolutionMinutes: number;
@@ -112,6 +115,7 @@ export type DashboardMetrics = {
   groupTotals: {
     alerts: number;
     openAlerts: number;
+    impactIncidents: number;
     hostCount: number;
     inactiveHosts: number;
   };

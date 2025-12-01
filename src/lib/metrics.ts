@@ -341,16 +341,17 @@ export async function buildDashboardMetrics(
   const resolutionDurations: number[] = [];
   const severityTotals = createSeverityCounter();
   const criticalAlerts: CriticalAlertHighlight[] = [];
+  let impactIncidents = 0;
   let falsePositives = 0;
   let falseNegatives = 0;
 
   for (const problem of problems) {
     const rawClock = Number(problem.clock);
-    const problemStart = Math.max(rawClock, startSeconds);
     const startsInsideRange =
       Number.isFinite(rawClock) &&
       rawClock >= startSeconds &&
       rawClock < endSeconds;
+    const problemStart = Math.max(rawClock, startSeconds);
     const severityKey = Number(problem.severity ?? 0);
     const severityLevel = Number.isFinite(severityKey) ? severityKey : null;
     const shouldCountAlert = startsInsideRange;
@@ -360,7 +361,18 @@ export async function buildDashboardMetrics(
     const rawRecovery = problem.r_eventid
       ? recoveryEventMap[problem.r_eventid]?.clock
       : undefined;
-    const resolvedSeconds = rawRecovery ? Number(rawRecovery) : null;
+    const resolvedSeconds =
+      rawRecovery !== undefined && rawRecovery !== null
+        ? Number(rawRecovery)
+        : null;
+    const hasResolution =
+      resolvedSeconds !== null && Number.isFinite(resolvedSeconds);
+    const resolvedInsideRange =
+      hasResolution &&
+      resolvedSeconds >= startSeconds &&
+      resolvedSeconds < endSeconds;
+    const qualifiesForResolutionMetrics =
+      startsInsideRange && resolvedInsideRange && hasResolution;
     const problemEnd = Math.min(
       resolvedSeconds !== null ? resolvedSeconds : endSeconds,
       endSeconds
@@ -381,14 +393,29 @@ export async function buildDashboardMetrics(
       responseDurations.push(responseDelta);
     }
 
-    const resolutionDelta = durationSeconds;
-    if (hasOverlap) {
-      resolutionDurations.push(resolutionDelta);
+    const resolutionDeltaForMetrics =
+      qualifiesForResolutionMetrics && hasResolution
+        ? Math.max(0, resolvedSeconds - rawClock)
+        : null;
+    if (resolutionDeltaForMetrics !== null) {
+      resolutionDurations.push(resolutionDeltaForMetrics);
     }
+
+    const durationMinutes = secondsToMinutes(durationSeconds);
 
     const shiftDurations = hasOverlap
       ? splitSecondsByShift(problemStart, problemEnd)
       : { business: 0, off: 0 };
+    const hasBusinessImpact =
+      severityLevel === 5 &&
+      shouldCountAlert &&
+      shiftDurations.business > 0;
+    const isSlowToNormalize = durationMinutes > 60;
+    const qualifiesForImpact = hasBusinessImpact && isSlowToNormalize;
+
+    if (qualifiesForImpact) {
+      impactIncidents += 1;
+    }
 
     const highlightHostIds: string[] = [];
     const highlightHostNames: string[] = [];
@@ -434,7 +461,9 @@ export async function buildDashboardMetrics(
         if (responseDelta !== null) {
           durationSample.response.push(responseDelta);
         }
-        durationSample.resolution.push(resolutionDelta);
+        if (resolutionDeltaForMetrics !== null) {
+          durationSample.resolution.push(resolutionDeltaForMetrics);
+        }
         hostDurationSamples.set(host.hostid, durationSample);
       }
 
@@ -460,6 +489,9 @@ export async function buildDashboardMetrics(
               acc.eventSeverities.set(eventKey, severityLevel);
             }
           }
+          if (qualifiesForImpact && eventKey) {
+            acc.impactIncidentIds.add(eventKey);
+          }
           if (severityLevel !== null && shouldCountAlert) {
             acc.severityCounter[severityLevel] =
               (acc.severityCounter[severityLevel] ?? 0) + 1;
@@ -473,7 +505,9 @@ export async function buildDashboardMetrics(
             if (responseDelta !== null) {
               acc.response.push(responseDelta);
             }
-            acc.resolution.push(resolutionDelta);
+            if (resolutionDeltaForMetrics !== null) {
+              acc.resolution.push(resolutionDeltaForMetrics);
+            }
           }
           groupAccumulators.set(group.groupid, acc);
         }
@@ -527,7 +561,8 @@ export async function buildDashboardMetrics(
           responseDelta !== null
             ? secondsToMinutes(responseDelta)
             : null,
-        resolutionMinutes: secondsToMinutes(resolutionDelta),
+        businessMinutes: secondsToMinutes(shiftDurations.business),
+        resolutionMinutes: durationMinutes,
       });
     }
   }
@@ -606,6 +641,7 @@ export async function buildDashboardMetrics(
       (acc, count) => acc + count,
       0
     ),
+    impactIncidents,
     inactiveHosts: inactiveHostCount,
   };
 
@@ -754,6 +790,7 @@ type GroupAccumulator = {
   eventIds: Set<string>;
   openEventIds: Set<string>;
   eventSeverities: Map<string, number>;
+  impactIncidentIds: Set<string>;
 };
 
 function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
@@ -775,6 +812,7 @@ function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
     eventIds: new Set<string>(),
     openEventIds: new Set<string>(),
     eventSeverities: new Map<string, number>(),
+    impactIncidentIds: new Set<string>(),
   };
 }
 
@@ -809,6 +847,7 @@ function buildGroupSummaries({
         name: acc.group.name,
         hosts: activeHostCount,
         inactiveHosts: acc.inactiveHosts,
+        impactIncidents: acc.impactIncidentIds.size,
         hostIds: Array.from(acc.activeHostIds),
         inactiveHostIds: Array.from(acc.inactiveHostIds),
         severitySummary: SEVERITY_LEVELS.map((level) => ({
@@ -820,6 +859,7 @@ function buildGroupSummaries({
         openAlerts: acc.openEventIds.size,
         eventIds: Array.from(acc.eventIds),
         openEventIds: Array.from(acc.openEventIds),
+        impactIncidentIds: Array.from(acc.impactIncidentIds),
         eventSeverities: Array.from(acc.eventSeverities.entries()).map(
           ([eventId, severity]) => ({
             eventId,

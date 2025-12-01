@@ -4,7 +4,23 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { format, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { AlertTriangle } from "lucide-react";
+import {
+  toPng,
+} from "html-to-image";
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  ArrowUpDown,
+  Bell,
+  Filter,
+  Gauge,
+  ImageDown,
+  Power,
+  RefreshCcw,
+  Server,
+  Timer,
+} from "lucide-react";
 import {
   OpenProblemDetail,
   CriticalAlertHighlight,
@@ -40,6 +56,7 @@ const HOST_SORT_FIELDS: Array<{ label: string; value: HostSortField }> = [
 type OverviewCardSource = {
   alerts: number;
   openAlerts: number;
+  impactIncidents: number;
   hosts: number;
   inactiveHosts: number;
   detection: number;
@@ -52,6 +69,7 @@ type OverviewCardSource = {
 const EMPTY_SOURCE: OverviewCardSource = {
   alerts: 0,
   openAlerts: 0,
+  impactIncidents: 0,
   hosts: 0,
   inactiveHosts: 0,
   detection: 0,
@@ -80,6 +98,7 @@ export function GlobalOverview() {
     useState<GroupMetricsApiResponse | null>(null);
   const [singleComparisonData, setSingleComparisonData] =
     useState<DashboardMetrics | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [sortField, setSortField] = useState<GroupSortField>("name");
   const [hostSortField, setHostSortField] = useState<HostSortField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
@@ -161,7 +180,7 @@ export function GlobalOverview() {
       active = false;
       controller.abort();
     };
-  }, [month, selectedGroups]);
+  }, [month, selectedGroups, refreshKey]);
 
   useEffect(() => {
     const previousMonth = getPreviousMonthValue(month);
@@ -203,7 +222,7 @@ export function GlobalOverview() {
       active = false;
       controller.abort();
     };
-  }, [month, selectedGroups]);
+  }, [month, selectedGroups, refreshKey]);
 
   useEffect(() => {
     if (selectedGroups.length !== 1) {
@@ -254,7 +273,7 @@ export function GlobalOverview() {
       active = false;
       controller.abort();
     };
-  }, [month, selectedGroups]);
+  }, [month, selectedGroups, refreshKey]);
 
   useEffect(() => {
     if (selectedGroups.length !== 1) {
@@ -298,7 +317,7 @@ export function GlobalOverview() {
       active = false;
       controller.abort();
     };
-  }, [month, selectedGroups]);
+  }, [month, selectedGroups, refreshKey]);
   const selectedGroupOptions = useMemo(
     () =>
       selectedGroups
@@ -465,6 +484,7 @@ export function GlobalOverview() {
     singleHighlights,
   ]);
 
+  const refreshing = groupLoading || singleLoading;
   const loading = isSingleGroupMode ? singleLoading : groupLoading;
   const error = singleError ?? groupError;
 
@@ -568,7 +588,7 @@ export function GlobalOverview() {
         </div>
       </header>
 
-      <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
         {(groupData || singleGroupData) && (
           <>
             <span className="rounded-2xl bg-slate-100 px-4 py-2">
@@ -601,6 +621,18 @@ export function GlobalOverview() {
             )}
           </>
         )}
+        <button
+          type="button"
+          onClick={() => setRefreshKey((value) => value + 1)}
+          disabled={refreshing}
+          className="ml-auto inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <RefreshCcw
+            className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+            aria-hidden
+          />
+          {refreshing ? "Atualizando..." : "Atualizar dados"}
+        </button>
       </div>
 
       <DisasterAlertHighlights alerts={disasterAlerts} loading={loading} />
@@ -613,6 +645,7 @@ export function GlobalOverview() {
         month={month}
         selectedGroups={selectedGroups}
         selectedGroupNames={selectedGroupNames}
+        disasterAlerts={disasterAlerts}
       />
 
       <SeverityTable summary={severitySummaryData} context={severityContext} />
@@ -765,7 +798,7 @@ const SECTION_LAYOUTS: Record<KpiSectionKey, { title: string; grid: string }> = 
   },
   alerts: {
     title: "Fluxo de alertas",
-    grid: "grid-cols-1 gap-4 lg:grid-cols-2",
+    grid: "grid-cols-1 gap-4 lg:grid-cols-3",
   },
   operations: {
     title: "Performance operacional",
@@ -826,6 +859,14 @@ const CARD_DEFINITIONS: CardDefinition[] = [
     unit: "number",
     betterDirection: "lower",
     description: "Necessitam acompanhamento",
+  },
+  {
+    id: "impactIncidents",
+    section: "alerts",
+    title: "Incidentes com impacto",
+    unit: "number",
+    betterDirection: "lower",
+    description: "Alertas disaster (7h-23:59) com resolucao > 60min",
   },
   {
     id: "detection",
@@ -962,6 +1003,114 @@ function OpenAlertsModal({
   );
 }
 
+type ImpactIncidentsModalProps = {
+  open: boolean;
+  onClose: () => void;
+  alerts: CriticalAlertHighlight[];
+  scopeLabel: string;
+};
+
+function ImpactIncidentsModal({
+  open,
+  onClose,
+  alerts,
+  scopeLabel,
+}: ImpactIncidentsModalProps) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4 py-8">
+      <div className="max-h-[80vh] w-full max-w-4xl overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500">
+              Incidentes com impacto
+            </p>
+            <p className="text-sm text-slate-500">
+              Disaster no horario comercial (&gt; 60min) | Escopo: {scopeLabel}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+          >
+            Fechar
+          </button>
+        </div>
+        <div className="max-h-[65vh] overflow-y-auto px-6 py-4">
+          {alerts.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Nenhum incidente com impacto (disaster &gt; 60min no horario
+              comercial) no escopo atual.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <div className="max-h-[60vh] overflow-y-auto rounded-2xl border border-slate-100">
+                <table className="min-w-full divide-y divide-slate-100 text-left text-sm text-slate-600">
+                  <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Alerta / Hosts</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Abertura</th>
+                      <th className="px-4 py-3">Encerramento</th>
+                      <th className="px-4 py-3 text-right">Resolucao (min)</th>
+                      <th className="px-4 py-3 text-right">
+                        Horario comercial (min)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {alerts.map((alert) => (
+                      <tr key={alert.eventId} className="bg-white/60">
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900">
+                            {alert.name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {formatListPreview(alert.hostNames) ||
+                              "Hosts indisponiveis"}
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            {formatListPreview(alert.groupNames) || "Sem grupo"}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-2xl px-3 py-1 text-xs font-semibold ${
+                              alert.isOpen
+                                ? "bg-rose-50 text-rose-700 ring-1 ring-rose-100"
+                                : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+                            }`}
+                          >
+                            {alert.isOpen ? "Em aberto" : "Resolvido"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-700">
+                          {formatAlertDate(alert.openedAt)}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-700">
+                          {alert.isOpen ? "—" : formatAlertDate(alert.closedAt)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-base font-semibold text-slate-900">
+                          {formatMinutesOrDash(alert.resolutionMinutes)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-base font-semibold text-slate-900">
+                          {formatMinutesOrDash(alert.businessMinutes)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OverviewCards({
   loading,
   source,
@@ -970,6 +1119,7 @@ function OverviewCards({
   month,
   selectedGroups,
   selectedGroupNames,
+  disasterAlerts,
 }: {
   loading: boolean;
   source: OverviewCardSource;
@@ -978,11 +1128,13 @@ function OverviewCards({
   month: string;
   selectedGroups: string[];
   selectedGroupNames: string[];
+  disasterAlerts: CriticalAlertHighlight[];
 }) {
   const [showOpenAlerts, setShowOpenAlerts] = useState(false);
   const [openAlerts, setOpenAlerts] = useState<OpenProblemDetail[] | null>(null);
   const [openAlertsLoading, setOpenAlertsLoading] = useState(false);
   const [openAlertsError, setOpenAlertsError] = useState<string | null>(null);
+  const [showImpactIncidents, setShowImpactIncidents] = useState(false);
 
   const sections = (Object.keys(SECTION_LAYOUTS) as KpiSectionKey[]).map((key) => ({
     key,
@@ -1000,6 +1152,14 @@ function OverviewCards({
       )
     );
   }, [openAlerts, selectedGroupNames]);
+
+  const impactAlerts = useMemo(() => {
+    return disasterAlerts.filter((alert) => {
+      const business = alert.businessMinutes ?? 0;
+      const resolution = alert.resolutionMinutes ?? 0;
+      return business > 0 && resolution > 60;
+    });
+  }, [disasterAlerts]);
 
   const handleOpenAlertsClick = () => {
     setShowOpenAlerts(true);
@@ -1029,6 +1189,10 @@ function OverviewCards({
       });
   };
 
+  const handleImpactIncidentsClick = () => {
+    setShowImpactIncidents(true);
+  };
+
   return (
     <div className="space-y-8">
       {sections.map((section) => (
@@ -1048,6 +1212,8 @@ function OverviewCards({
               const status = buildCardStatus(definition, value, previousValue);
               const trend = buildTrendText(definition, value, previousValue);
               const isOpenAlertsCard = definition.id === "openAlerts";
+              const isImpactIncidentsCard =
+                definition.id === "impactIncidents";
               const contracted =
                 definition.id === "hosts" ? source.contractedHosts : null;
               let contractedBadge: JSX.Element | null = null;
@@ -1126,12 +1292,20 @@ function OverviewCards({
                 </div>
               );
 
-              return isOpenAlertsCard ? (
+              const isClickableCard =
+                isOpenAlertsCard || isImpactIncidentsCard;
+              const handleClick = isOpenAlertsCard
+                ? handleOpenAlertsClick
+                : isImpactIncidentsCard
+                ? handleImpactIncidentsClick
+                : undefined;
+
+              return isClickableCard && handleClick ? (
                 <button
                   key={definition.id}
                   type="button"
-                  onClick={handleOpenAlertsClick}
-                  className="text-left"
+                  onClick={handleClick}
+                  className="w-full text-left"
                 >
                   {cardContent}
                 </button>
@@ -1154,6 +1328,16 @@ function OverviewCards({
             : "Todos os clientes"
         }
       />
+      <ImpactIncidentsModal
+        open={showImpactIncidents}
+        onClose={() => setShowImpactIncidents(false)}
+        alerts={impactAlerts}
+        scopeLabel={
+          selectedGroupNames.length
+            ? selectedGroupNames.join(", ")
+            : "Todos os clientes"
+        }
+      />
     </div>
   );
 }
@@ -1166,83 +1350,378 @@ function GroupTable({
   rows: HostGroupMetric[];
   loading: boolean;
 }) {
+  const AVAILABILITY_TARGET = 99.5;
+  const BUSINESS_AVAILABILITY_TARGET = 99.0;
+  const [businessSort, setBusinessSort] = useState<"asc" | "desc">("desc");
+  const [businessFilter, setBusinessFilter] = useState<
+    "all" | "below" | "within"
+  >("all");
+  const [exporting, setExporting] = useState(false);
+  const exportTargetRef = useRef<HTMLDivElement | null>(null);
+  const textPrimaryClass = exporting ? "text-white" : "text-slate-800";
+  const COLUMN_DIVIDER_CLASS = exporting
+    ? "border-l border-white/40 first:border-l-0"
+    : "border-l border-slate-200/60 first:border-l-0";
+  const CONTAINER_BORDER_CLASS = exporting
+    ? "border-white/50"
+    : "border-slate-100";
+  const TABLE_DIVIDER_CLASS = exporting
+    ? "divide-white/50"
+    : "divide-slate-100/70";
+
+  const processedRows = useMemo(() => {
+    const base = [...rows];
+    const filtered =
+      businessFilter === "below"
+        ? base.filter((group) => group.businessAvailabilityPct < BUSINESS_AVAILABILITY_TARGET)
+        : businessFilter === "within"
+        ? base.filter((group) => group.businessAvailabilityPct >= BUSINESS_AVAILABILITY_TARGET)
+        : base;
+
+    return filtered.sort((a, b) =>
+      businessSort === "asc"
+        ? a.businessAvailabilityPct - b.businessAvailabilityPct
+        : b.businessAvailabilityPct - a.businessAvailabilityPct
+    );
+  }, [rows, businessFilter, businessSort]);
+
+  const hasFilterApplied = businessFilter !== "all";
+
+  const handleExport = async () => {
+    if (!exportTargetRef.current) return;
+    try {
+      setExporting(true);
+      const dataUrl = await toPng(exportTargetRef.current, {
+        cacheBust: true,
+        backgroundColor: "transparent",
+      });
+      const link = document.createElement("a");
+      link.download = `host-groups-${Date.now()}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (error) {
+      console.error("Falha ao exportar tabela", error);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const headerBgClass = "bg-slate-50/80";
+  const theadBgClass = exporting ? "bg-white/10" : "bg-slate-900";
+  const tbodyBgClass = exporting ? "bg-transparent" : "bg-white";
+
   return (
-    <div className="rounded-2xl border border-slate-100">
-      <table className="min-w-full divide-y divide-slate-100 text-sm">
-        <thead className="bg-slate-50 text-slate-600">
-          <tr>
-            <th className="px-4 py-3 text-left font-semibold">Host group</th>
-            <th className="px-4 py-3 text-right font-semibold">Hosts</th>
-            <th className="px-4 py-3 text-right font-semibold">Inativos</th>
-            <th className="px-4 py-3 text-right font-semibold">Alertas</th>
-            <th className="px-4 py-3 text-right font-semibold">
-              Alertas em aberto
-            </th>
-            <th className="px-4 py-3 text-right font-semibold">
-              Tempo de resposta (1o ACK)
-            </th>
-            <th className="px-4 py-3 text-right font-semibold">
-              Resolução (min)
-            </th>
-            <th className="px-4 py-3 text-right font-semibold">
-              Disponibilidade (%)
-            </th>
-            <th className="px-4 py-3 text-right font-semibold">
-              Disponibilidade (7h-23:59)
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 bg-white text-slate-800">
-          {loading && (
+    <div className={`rounded-2xl border ${CONTAINER_BORDER_CLASS}`}>
+      <div
+        className={`flex flex-wrap items-center justify-between gap-3 border-b border-slate-100/80 px-4 py-3 text-sm ${headerBgClass} text-slate-600`}
+      >
+        <div
+          className="flex items-center gap-2 font-semibold text-slate-700"
+        >
+          <Filter className="h-4 w-4" aria-hidden />
+          Disponibilidade (7h–23:59) — meta {BUSINESS_AVAILABILITY_TARGET.toFixed(1)}%
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setBusinessSort((prev) => (prev === "asc" ? "desc" : "asc"))
+            }
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+          >
+            <ArrowUpDown
+              className={`h-4 w-4 ${businessSort === "asc" ? "rotate-180" : ""}`}
+              aria-hidden
+            />
+            {businessSort === "asc" ? "Menor → maior" : "Maior → menor"}
+          </button>
+          <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            {[
+              { id: "all", label: "Todos" },
+              { id: "below", label: "Abaixo da meta" },
+              { id: "within", label: "Dentro da meta" },
+            ].map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setBusinessFilter(option.id as typeof businessFilter)}
+                className={`rounded-lg px-3 py-1 text-sm font-semibold transition ${
+                  businessFilter === option.id
+                    ? "bg-slate-900 text-white shadow"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <ImageDown className={`h-4 w-4 ${exporting ? "animate-pulse" : ""}`} aria-hidden />
+            {exporting ? "Exportando..." : "Exportar imagem"}
+          </button>
+        </div>
+      </div>
+      <div
+        ref={exportTargetRef}
+        style={exporting ? { backgroundColor: "transparent" } : undefined}
+      >
+        <table className={`min-w-full divide-y ${TABLE_DIVIDER_CLASS} text-lg`}>
+          <thead
+            className={`${theadBgClass} text-white`}
+          >
             <tr>
-              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
-                Carregando métricas...
-              </td>
+              <HeaderCell
+                align="center"
+                icon={<Server className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Host group
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Activity className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Hosts
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Power className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Inativos
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<AlertCircle className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Alertas
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Bell className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Alertas em aberto
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Timer className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Tempo de resposta (1o ACK)
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Timer className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Resolução (min)
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Gauge className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Disponibilidade (%)
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Gauge className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Disponibilidade (7h-23:59)
+              </HeaderCell>
             </tr>
-          )}
-          {!loading && rows.length === 0 && (
-            <tr>
-              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
-                Nenhum host group encontrado.
-              </td>
-            </tr>
-          )}
-          {!loading &&
-            rows.map((group) => (
-              <tr key={group.groupid}>
-                <td className="px-4 py-3 font-semibold">{group.name}</td>
-                <td className="px-4 py-3 text-right">{group.hosts}</td>
-                <td className="px-4 py-3 text-right">{group.inactiveHosts}</td>
-                <td className="px-4 py-3 text-right">{group.alerts}</td>
-                <td className="px-4 py-3 text-right">{group.openAlerts}</td>
-                <td className="px-4 py-3 text-right">
-                  {formatMinutes(group.detectionMinutes)}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {formatMinutes(group.resolutionMinutes)}
-                </td>
+          </thead>
+          <tbody
+            className={`divide-y ${TABLE_DIVIDER_CLASS} ${tbodyBgClass} ${textPrimaryClass}`}
+          >
+            {loading && (
+              <tr>
                 <td
-                  className={`px-4 py-3 text-right ${
-                    group.availabilityPct < 99
-                      ? "text-rose-600"
-                      : "text-emerald-600"
-                  }`}
+                  colSpan={9}
+                  className={`px-4 py-6 text-center ${exporting ? "text-white/80" : "text-slate-500"}`}
                 >
-                  {group.availabilityPct.toFixed(2)}%
-                </td>
-                <td
-                  className={`px-4 py-3 text-right ${
-                    group.businessAvailabilityPct < 99
-                      ? "text-rose-600"
-                      : "text-emerald-600"
-                  }`}
-                >
-                  {group.businessAvailabilityPct.toFixed(2)}%
+                  Carregando métricas...
                 </td>
               </tr>
-            ))}
-        </tbody>
-      </table>
+            )}
+            {!loading && processedRows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={9}
+                  className={`px-4 py-6 text-center ${exporting ? "text-white/80" : "text-slate-500"}`}
+                >
+                  {hasFilterApplied
+                    ? "Nenhum host group atende ao filtro selecionado."
+                    : "Nenhum host group encontrado."}
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              processedRows.map((group) => (
+                <tr key={group.groupid}>
+                  <td
+                  className={`px-4 py-3 font-semibold text-lg md:text-xl ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                >
+                  {group.name}
+                </td>
+                  <td
+                    className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                  >
+                    {group.hosts}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                  >
+                    {group.inactiveHosts}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                  >
+                    {group.alerts}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                  >
+                    {group.openAlerts}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                  >
+                    {formatMinutes(group.detectionMinutes)}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                  >
+                    {formatMinutes(group.resolutionMinutes)}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right ${COLUMN_DIVIDER_CLASS}`}
+                  >
+                    <AvailabilityCell
+                      value={group.availabilityPct}
+                      target={AVAILABILITY_TARGET}
+                      label="Geral"
+                      exporting={exporting}
+                    />
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right ${COLUMN_DIVIDER_CLASS}`}
+                  >
+                    <AvailabilityCell
+                      value={group.businessAvailabilityPct}
+                      target={BUSINESS_AVAILABILITY_TARGET}
+                      label="Comercial"
+                      exporting={exporting}
+                    />
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function HeaderCell({
+  children,
+  icon,
+  align = "center",
+  dividerClass = "",
+  exporting = false,
+}: {
+  children: React.ReactNode;
+  icon: React.ReactNode;
+  align?: "left" | "right" | "center";
+  dividerClass?: string;
+  exporting?: boolean;
+}) {
+  const alignment =
+    align === "left"
+      ? "text-left justify-start"
+      : align === "right"
+      ? "text-right justify-end"
+      : "text-center justify-center";
+  const textColor = exporting ? "text-white" : "text-slate-600";
+  const iconColor = exporting ? "text-white" : "text-slate-400";
+  return (
+    <th
+      className={`px-4 py-3 font-semibold text-lg md:text-xl ${alignment} ${dividerClass} ${textColor}`}
+    >
+      <span className={`inline-flex items-center gap-2 ${alignment} ${textColor}`}>
+        <span className={iconColor}>{icon}</span>
+        {children}
+      </span>
+    </th>
+  );
+}
+
+function AvailabilityCell({
+  value,
+  target,
+  label,
+  exporting = false,
+}: {
+  value: number;
+  target: number;
+  label: string;
+  exporting?: boolean;
+}) {
+  const clamped = Math.max(0, Math.min(value, 100));
+  const belowTarget = clamped < target;
+  const barWidth = `${Math.max(6, Math.min(clamped, 100))}%`;
+  const barClass = belowTarget ? "bg-amber-400" : "bg-emerald-500";
+  const labelClass = exporting ? "text-white/80" : "text-slate-500";
+  const valueClass = exporting
+    ? "text-white"
+    : belowTarget
+    ? "text-amber-700"
+    : "text-emerald-700";
+  const badgeClass = exporting
+    ? "inline-flex items-center gap-1 rounded-full border border-white/60 bg-white/10 px-2 py-0.5 font-semibold text-white"
+    : "inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-700";
+  const barBgClass = exporting ? "bg-white/20" : "bg-slate-100";
+
+  return (
+    <div className="space-y-1 text-right">
+      <div className={`flex items-center justify-end gap-2 text-xs ${labelClass}`}>
+        <span>{label}</span>
+        {belowTarget && (
+          <span className={badgeClass}>
+            <AlertTriangle className="h-3 w-3" aria-hidden />
+            Abaixo da meta
+          </span>
+        )}
+      </div>
+      <div className="flex items-center justify-end gap-3">
+        <div className={`relative h-3 w-28 overflow-hidden rounded-full ${barBgClass}`}>
+          <div
+            className={`absolute left-0 top-0 h-full ${barClass}`}
+            style={{ width: barWidth }}
+          />
+        </div>
+        <span className={`min-w-[72px] text-sm font-semibold ${valueClass}`}>
+          {clamped.toFixed(2)}%
+        </span>
+      </div>
     </div>
   );
 }
@@ -1379,12 +1858,16 @@ function summarizeHostGroupMetrics(
   const inactiveUnion = new Set<string>();
   const alertUnion = new Set<string>();
   const openAlertUnion = new Set<string>();
+  const impactIncidentUnion = new Set<string>();
 
   groups.forEach((group) => {
     group.hostIds.forEach((id) => activeUnion.add(id));
     group.inactiveHostIds?.forEach((id) => inactiveUnion.add(id));
     group.eventIds?.forEach((id) => alertUnion.add(id));
     group.openEventIds?.forEach((id) => openAlertUnion.add(id));
+    group.impactIncidentIds?.forEach((id) =>
+      impactIncidentUnion.add(id)
+    );
   });
 
   const sumAlerts =
@@ -1393,6 +1876,12 @@ function summarizeHostGroupMetrics(
   const sumOpenAlerts =
     openAlertUnion.size ||
     groups.reduce((acc, group) => acc + (group.openAlerts || 0), 0);
+  const sumImpactIncidents =
+    impactIncidentUnion.size ||
+    groups.reduce(
+      (acc, group) => acc + (group.impactIncidents || 0),
+      0
+    );
 
   const detectionWeight = groups.reduce(
     (acc, group) => acc + (group.alerts || 0),
@@ -1440,6 +1929,7 @@ function summarizeHostGroupMetrics(
   return {
     alerts: sumAlerts,
     openAlerts: sumOpenAlerts,
+    impactIncidents: sumImpactIncidents,
     hosts: activeUnion.size,
     inactiveHosts: inactiveUnion.size,
     severitySummary: buildSeveritySummaryFromGroups(groups),
@@ -1514,6 +2004,7 @@ function convertSummaryToSource(
   return {
     alerts: summary.alerts,
     openAlerts: summary.openAlerts,
+    impactIncidents: summary.impactIncidents,
     hosts: summary.hosts,
     inactiveHosts: summary.inactiveHosts,
     detection: summary.detection,
@@ -1531,6 +2022,7 @@ function convertTotalsToSource(
   return {
     alerts: data.totals.alerts ?? 0,
     openAlerts: data.totals.openAlerts ?? 0,
+    impactIncidents: data.totals.impactIncidents ?? 0,
     hosts: data.totals.hostCount ?? 0,
     inactiveHosts: data.totals.inactiveHosts ?? 0,
     detection: data.kpis.detectionMinutes ?? 0,
@@ -1548,6 +2040,7 @@ function convertSingleToSource(
   return {
     alerts: data.groupTotals.alerts ?? 0,
     openAlerts: data.groupTotals.openAlerts ?? 0,
+    impactIncidents: data.groupTotals.impactIncidents ?? 0,
     hosts: data.groupTotals.hostCount ?? 0,
     inactiveHosts: data.groupTotals.inactiveHosts ?? 0,
     detection: data.kpis.detectionMinutes ?? 0,

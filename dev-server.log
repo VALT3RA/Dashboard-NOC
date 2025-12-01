@@ -1,0 +1,238 @@
+
+> noc-dashboard@0.1.0 dev
+> next dev
+
+   ▲ Next.js 16.0.2 (Turbopack)
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.15.44:3000
+   - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 2.8s
+ ○ Compiling / ...
+ GET / 200 in 3.8s (compile: 3.5s, render: 293ms)
+ GET /api/host-groups 200 in 1536ms (compile: 982ms, render: 554ms)
+ GET /api/group-metrics?month=2025-10 200 in 14.9s (compile: 1167ms, render: 13.8s)
+ GET /api/group-metrics?month=2025-11 200 in 14.9s (compile: 1187ms, render: 13.7s)
+ GET /api/group-metrics?month=2025-09 200 in 3.3s (compile: 5ms, render: 3.3s)
+ GET /api/group-metrics?month=2025-10 200 in 3.3s (compile: 3ms, render: 3.3s)
+ GET /api/group-metrics?month=2025-09&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 987ms (compile: 15ms, render: 972ms)
+ GET /api/group-metrics?month=2025-10&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 988ms (compile: 5ms, render: 983ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 83s (compile: 7ms, render: 83s)
+ GET /api/group-metrics?month=2025-09&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 115s (compile: 16ms, render: 115s)
+ ○ Compiling /reports/slow-resolutions ...
+ GET /reports/slow-resolutions?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 200 in 9.8s (compile: 9.7s, render: 70ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 360ms (compile: 8ms, render: 352ms)
+ GET /reports/slow-resolutions?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 147ms (compile: 5ms, render: 143ms)
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 200 in 35ms (compile: 4ms, render: 31ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 1428ms (compile: 4ms, render: 1424ms)
+ GET /api/host-groups 200 in 491ms (compile: 6ms, render: 486ms)
+ GET /api/host-groups 200 in 519ms (compile: 4ms, render: 515ms)
+ GET /api/group-metrics?month=2025-10 200 in 1739ms (compile: 7ms, render: 1732ms)
+ GET /api/group-metrics?month=2025-11 200 in 1763ms (compile: 15ms, render: 1748ms)
+ GET /api/group-metrics?month=2025-09 200 in 3.2s (compile: 3ms, render: 3.2s)
+ GET /api/group-metrics?month=2025-10 200 in 3.2s (compile: 3ms, render: 3.2s)
+ GET /api/group-metrics?month=2025-09&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 901ms (compile: 23ms, render: 878ms)
+ GET /api/group-metrics?month=2025-10&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 902ms (compile: 13ms, render: 890ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 2.5min (compile: 5ms, render: 2.5min)
+ GET /api/group-metrics?month=2025-09&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 2.9min (compile: 13ms, render: 2.9min)
+ GET /reports/slow-resolutions?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 98ms (compile: 11ms, render: 87ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 51s (compile: 3ms, render: 51s)
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 200 in 88ms (compile: 6ms, render: 81ms)
+ GET /api/host-groups 200 in 639ms (compile: 3ms, render: 636ms)
+ GET /api/group-metrics?month=2025-11 200 in 2.0s (compile: 268ms, render: 1768ms)
+ GET /api/group-metrics?month=2025-10 200 in 2.0s (compile: 246ms, render: 1791ms)
+ GET /api/group-metrics?month=2025-09 200 in 3.3s (compile: 4ms, render: 3.3s)
+ GET /api/group-metrics?month=2025-10 200 in 3.3s (compile: 2ms, render: 3.3s)
+ GET /api/group-metrics?month=2025-09&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 916ms (compile: 13ms, render: 903ms)
+ GET /api/group-metrics?month=2025-10&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 917ms (compile: 4ms, render: 913ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 115s (compile: 4ms, render: 115s)
+ GET /api/group-metrics?month=2025-09&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 2.2min (compile: 10ms, render: 2.2min)
+ ✓ Compiled in 247ms
+ ✓ Compiled in 97ms
+ ✓ Compiled in 75ms
+ GET /api/host-groups 200 in 7.8s (compile: 345ms, render: 7.4s)
+ ✓ Compiled in 114ms
+ ✓ Compiled in 65ms
+ ✓ Compiled in 96ms
+ GET /api/group-metrics?month=2025-11 200 in 70s (compile: 149ms, render: 70s)
+ GET /api/group-metrics?month=2025-10 200 in 94s (compile: 384ms, render: 93s)
+ ✓ Compiled in 0ms
+ GET /api/group-metrics?month=2025-09 200 in 3.5s (compile: 5ms, render: 3.5s)
+ GET /api/group-metrics?month=2025-10 200 in 3.5s (compile: 15ms, render: 3.5s)
+ GET /api/group-metrics?month=2025-09&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 610ms (compile: 31ms, render: 579ms)
+ GET /api/group-metrics?month=2025-10&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 611ms (compile: 6ms, render: 605ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 57s (compile: 4ms, render: 57s)
+ GET /api/group-metrics?month=2025-09&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 84s (compile: 10ms, render: 84s)
+ ✓ Compiled in 98ms
+ ✓ Compiled in 54ms
+ ✓ Compiled in 66ms
+ ✓ Compiled in 62ms
+ ✓ Compiled in 67ms
+ ✓ Compiled in 65ms
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 200 in 403ms (compile: 182ms, render: 221ms)
+ GET /api/host-groups 200 in 455ms (compile: 6ms, render: 449ms)
+ GET /api/group-metrics?month=2025-10 200 in 2.2s (compile: 333ms, render: 1881ms)
+ GET /api/group-metrics?month=2025-11 200 in 2.2s (compile: 303ms, render: 1910ms)
+ GET /api/group-metrics?month=2025-09 200 in 3.5s (compile: 4ms, render: 3.5s)
+ GET /api/group-metrics?month=2025-10 200 in 3.5s (compile: 2ms, render: 3.5s)
+ GET /api/group-metrics?month=2025-09&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 730ms (compile: 12ms, render: 719ms)
+ GET /api/group-metrics?month=2025-10&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 732ms (compile: 4ms, render: 727ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 87s (compile: 13ms, render: 87s)
+ GET /api/group-metrics?month=2025-09&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 118s (compile: 5ms, render: 118s)
+ ✓ Compiled in 284ms
+ ✓ Compiled in 923ms
+ ✓ Compiled in 125ms
+ ✓ Compiled in 74ms
+ ✓ Compiled in 156ms
+ GET /api/group-metrics?month=2025-10&groupIds=127,25,23,93,178,22,31,113,29,30 200 in 4.9s (compile: 338ms, render: 4.5s)
+ GET /api/group-metrics?month=2025-09&groupIds=127,25,23,93,178,22,31,113,29,30 200 in 4.8s (compile: 60ms, render: 4.7s)
+ GET /api/group-metrics?month=2025-09&groupIds=127,23,93,178,22,31,113,29,30 200 in 3.1s (compile: 29ms, render: 3.1s)
+ GET /api/group-metrics?month=2025-10&groupIds=127,23,93,178,22,31,113,29,30 200 in 3.1s (compile: 5ms, render: 3.1s)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30 200 in 51s (compile: 3ms, render: 51s)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30 200 in 52s (compile: 9ms, render: 52s)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,127 200 in 1434ms (compile: 7ms, render: 1428ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,127 200 in 1433ms (compile: 22ms, render: 1411ms)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,127,24 200 in 1701ms (compile: 18ms, render: 1683ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,127,24 200 in 1702ms (compile: 10ms, render: 1692ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,127,24,25 200 in 61s (compile: 3ms, render: 61s)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,127,24,25 200 in 78s (compile: 9ms, render: 78s)
+ ✓ Compiled in 124ms
+ ✓ Compiled in 361ms
+ ✓ Compiled in 159ms
+ ✓ Compiled in 89ms
+ ✓ Compiled in 185ms
+ ✓ Compiled in 74ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 95ms
+ ⨯ ReferenceError: tableRef is not defined
+    at GroupTable (src\components\global-overview.tsx:1264:12)
+  1262 |     <div
+  1263 |       className="rounded-2xl border border-slate-100"
+> 1264 |       ref={tableRef}
+       |            ^
+  1265 |       style={exporting ? { backgroundColor: "transparent" } : undefined}
+  1266 |     >
+  1267 |       <div {
+  digest: '263037611'
+}
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 500 in 659ms (compile: 321ms, render: 339ms)
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⨯ ReferenceError: tableRef is not defined
+    at GroupTable (src\components\global-overview.tsx:1264:12)
+  1262 |     <div
+  1263 |       className="rounded-2xl border border-slate-100"
+> 1264 |       ref={tableRef}
+       |            ^
+  1265 |       style={exporting ? { backgroundColor: "transparent" } : undefined}
+  1266 |     >
+  1267 |       <div {
+  digest: '263037611'
+}
+ ✓ Compiled in 70ms
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 500 in 340ms (compile: 126ms, render: 215ms)
+ ✓ Compiled in 77ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 200 in 339ms (compile: 163ms, render: 176ms)
+ GET /api/host-groups 200 in 432ms (compile: 31ms, render: 401ms)
+ GET /api/group-metrics?month=2025-10 200 in 1651ms (compile: 5ms, render: 1646ms)
+ GET /api/group-metrics?month=2025-11 200 in 1701ms (compile: 6ms, render: 1696ms)
+ GET /api/group-metrics?month=2025-09 200 in 3.6s (compile: 3ms, render: 3.6s)
+ GET /api/group-metrics?month=2025-10 200 in 3.6s (compile: 7ms, render: 3.6s)
+ GET /api/group-metrics?month=2025-09&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 820ms (compile: 14ms, render: 806ms)
+ GET /api/group-metrics?month=2025-10&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 821ms (compile: 5ms, render: 816ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 117s (compile: 11ms, render: 117s)
+ GET /api/group-metrics?month=2025-09&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 2.2min (compile: 4ms, render: 2.2min)
+ GET /api/group-metrics?month=2025-09&groupIds=24,25,23,93,178,22,31,113,29,30 200 in 1032ms (compile: 23ms, render: 1010ms)
+ GET /api/group-metrics?month=2025-10&groupIds=24,25,23,93,178,22,31,113,29,30 200 in 1034ms (compile: 6ms, render: 1028ms)
+ GET /api/group-metrics?month=2025-09&groupIds=25,23,93,178,22,31,113,29,30 200 in 500ms (compile: 13ms, render: 487ms)
+ GET /api/group-metrics?month=2025-10&groupIds=25,23,93,178,22,31,113,29,30 200 in 501ms (compile: 4ms, render: 497ms)
+ GET /api/group-metrics?month=2025-09&groupIds=25,93,178,22,31,113,29,30 200 in 1228ms (compile: 11ms, render: 1217ms)
+ GET /api/group-metrics?month=2025-10&groupIds=25,93,178,22,31,113,29,30 200 in 1229ms (compile: 3ms, render: 1226ms)
+ GET /api/group-metrics?month=2025-09&groupIds=93,178,22,31,113,29,30 200 in 1995ms (compile: 13ms, render: 1981ms)
+ GET /api/group-metrics?month=2025-10&groupIds=93,178,22,31,113,29,30 200 in 1996ms (compile: 3ms, render: 1992ms)
+ GET /api/group-metrics?month=2025-09&groupIds=93,178,22,31,113,29,30,23 200 in 32.5s (compile: 10ms, render: 32.5s)
+ GET /api/group-metrics?month=2025-10&groupIds=93,178,22,31,113,29,30,23 200 in 32.5s (compile: 5ms, render: 32.5s)
+ ✓ Compiled in 3ms
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 58ms
+ ⨯ ReferenceError: Cannot access 'exporting' before initialization
+    at GroupTable (src\components\global-overview.tsx:1211:32)
+  1209 |   const AVAILABILITY_TARGET = 99.5;
+  1210 |   const BUSINESS_AVAILABILITY_TARGET = 99.0;
+> 1211 |   const COLUMN_DIVIDER_CLASS = exporting
+       |                                ^
+  1212 |     ? "border-l border-white/40 first:border-l-0"
+  1213 |     : "border-l border-slate-200/60 first:border-l-0";
+  1214 |   const CONTAINER_BORDER_CLASS = exporting {
+  digest: '762731066'
+}
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 500 in 620ms (compile: 173ms, render: 446ms)
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ⨯ ReferenceError: Cannot access 'exporting' before initialization
+    at GroupTable (src\components\global-overview.tsx:1211:32)
+  1209 |   const AVAILABILITY_TARGET = 99.5;
+  1210 |   const BUSINESS_AVAILABILITY_TARGET = 99.0;
+> 1211 |   const COLUMN_DIVIDER_CLASS = exporting
+       |                                ^
+  1212 |     ? "border-l border-white/40 first:border-l-0"
+  1213 |     : "border-l border-slate-200/60 first:border-l-0";
+  1214 |   const CONTAINER_BORDER_CLASS = exporting {
+  digest: '762731066'
+}
+ ✓ Compiled in 0ms
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 500 in 276ms (compile: 108ms, render: 169ms)
+ ⨯ ReferenceError: Cannot access 'exporting' before initialization
+    at GroupTable (src\components\global-overview.tsx:1211:32)
+  1209 |   const AVAILABILITY_TARGET = 99.5;
+  1210 |   const BUSINESS_AVAILABILITY_TARGET = 99.0;
+> 1211 |   const COLUMN_DIVIDER_CLASS = exporting
+       |                                ^
+  1212 |     ? "border-l border-white/40 first:border-l-0"
+  1213 |     : "border-l border-slate-200/60 first:border-l-0";
+  1214 |   const CONTAINER_BORDER_CLASS = exporting {
+  digest: '762731066'
+}
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 500 in 82ms (compile: 4ms, render: 78ms)
+ ⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ ✓ Compiled in 80ms
+ GET /?month=2025-10&groupIds=127%2C24%2C25%2C23%2C93%2C178%2C22%2C31%2C113%2C29%2C30 200 in 346ms (compile: 185ms, render: 160ms)
+ GET /api/host-groups 200 in 670ms (compile: 4ms, render: 665ms)
+ GET /api/group-metrics?month=2025-10 200 in 22.4s (compile: 36ms, render: 22.4s)
+ GET /api/group-metrics?month=2025-11 200 in 22.4s (compile: 23ms, render: 22.4s)
+ GET /api/group-metrics?month=2025-09 200 in 1537ms (compile: 4ms, render: 1533ms)
+ GET /api/group-metrics?month=2025-10 200 in 1522ms (compile: 2ms, render: 1520ms)
+ GET /api/group-metrics?month=2025-09&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,21,127,24,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 3.2s (compile: 13ms, render: 3.2s)
+ GET /api/group-metrics?month=2025-10&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,21,127,24,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 3.2s (compile: 3ms, render: 3.2s)
+ GET /api/group-metrics?month=2025-09&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,127,24,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 3.1s (compile: 9ms, render: 3.1s)
+ GET /api/group-metrics?month=2025-10&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,127,24,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 3.1s (compile: 4ms, render: 3.1s)
+ GET /api/group-metrics?month=2025-09&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,24,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 973ms (compile: 9ms, render: 963ms)
+ GET /api/group-metrics?month=2025-10&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,24,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 974ms (compile: 5ms, render: 969ms)
+ GET /api/group-metrics?month=2025-09&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 875ms (compile: 11ms, render: 864ms)
+ GET /api/group-metrics?month=2025-10&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,25,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 876ms (compile: 4ms, render: 872ms)
+ GET /api/group-metrics?month=2025-10&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 5.7s (compile: 4ms, render: 5.7s)
+ GET /api/group-metrics?month=2025-09&groupIds=133,190,191,140,141,76,77,109,110,62,64,63,71,72,73,189,54,55,38,39,23,93,178,22,31,113,29,30,107,108,199,176,132,196,128,129,204,200,57,58,105,20,182,177,60,192,193,139,40,41,130,33,32,59,116,124,117,123,44,106,91,48,45,74,75,185,186,194,201,183,184,66,67,69,68,61,78,79,80,145,198,197,131,175,135,203,34,35,81,82,83,119,120,36,37,174,180,181,49,52,50,125,126,187,188,42,43,90,142,143,4,84,92,87,86,89,85,88,111,112 200 in 5.7s (compile: 12ms, render: 5.7s)
+ GET /api/group-metrics?month=2025-09 200 in 5.7s (compile: 9ms, render: 5.7s)
+ GET /api/group-metrics?month=2025-10 200 in 5.7s (compile: 5ms, render: 5.7s)
+ GET /api/group-metrics?month=2025-09&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 1213ms (compile: 10ms, render: 1203ms)
+ GET /api/group-metrics?month=2025-10&groupIds=21,127,24,25,23,93,178,22,31,113,29,30 200 in 1214ms (compile: 4ms, render: 1209ms)
+ GET /api/group-metrics?month=2025-09&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 746ms (compile: 3ms, render: 743ms)
+ GET /api/group-metrics?month=2025-10&groupIds=127,24,25,23,93,178,22,31,113,29,30 200 in 746ms (compile: 9ms, render: 737ms)
+ GET /api/group-metrics?month=2025-09&groupIds=24,25,23,93,178,22,31,113,29,30 200 in 684ms (compile: 8ms, render: 676ms)
+ GET /api/group-metrics?month=2025-10&groupIds=24,25,23,93,178,22,31,113,29,30 200 in 685ms (compile: 3ms, render: 683ms)
+ GET /api/group-metrics?month=2025-10&groupIds=25,23,93,178,22,31,113,29,30 200 in 628ms (compile: 4ms, render: 624ms)
+ GET /api/group-metrics?month=2025-09&groupIds=25,23,93,178,22,31,113,29,30 200 in 641ms (compile: 14ms, render: 628ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30 200 in 109s (compile: 3ms, render: 109s)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30 200 in 2.0min (compile: 10ms, render: 2.0min)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,127 200 in 1411ms (compile: 30ms, render: 1381ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,127 200 in 1413ms (compile: 15ms, render: 1399ms)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,127,24 200 in 1136ms (compile: 13ms, render: 1123ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,127,24 200 in 1138ms (compile: 5ms, render: 1133ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,127,24,25 200 in 4.8min (compile: 3ms, render: 4.8min)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,127,24,25 200 in 5.2min (compile: 11ms, render: 5.2min)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,24,25 200 in 765ms (compile: 75ms, render: 690ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,24,25 200 in 796ms (compile: 169ms, render: 627ms)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30,25 200 in 728ms (compile: 15ms, render: 713ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30,25 200 in 729ms (compile: 7ms, render: 722ms)
+ GET /api/group-metrics?month=2025-10&groupIds=23,93,178,22,31,113,29,30 200 in 43s (compile: 13ms, render: 43s)
+ GET /api/group-metrics?month=2025-09&groupIds=23,93,178,22,31,113,29,30 200 in 45s (compile: 7ms, render: 45s)

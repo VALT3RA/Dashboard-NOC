@@ -162,7 +162,9 @@ export function OpenProblemsTable({ problems, generatedAt }: Props) {
                         ? problem.groupNames.map((group) => (
                             <li key={group}>{group}</li>
                           ))
-                        : "—"}
+                        : (
+                          <li className="text-slate-400">Sem grupo</li>
+                        )}
                     </ul>
                   </td>
                   <td className="px-4 py-4 align-top">

@@ -7,14 +7,22 @@ import {
   fetchHostsByIds,
   fetchProblems,
   fetchRecoveryEvents,
+  fetchTriggersByIds,
   ZabbixHost,
+  ZabbixHostGroup,
+  ZabbixItem,
   ZabbixProblem,
+  ZabbixTrigger,
 } from "@/lib/zabbix";
 import {
+  AvailabilityAlertImpact,
+  AvailabilityHostImpact,
+  AvailabilityInsights,
   CriticalAlertHighlight,
   DashboardMetrics,
   HostGroupMetric,
   HostMetric,
+  GroupAlertDetail,
 } from "@/types/dashboard";
 
 const DEFAULT_TIMEZONE =
@@ -44,6 +52,11 @@ type HostCategory = {
   id: string;
   label: string;
   keywords: RegExp[];
+};
+
+type Interval = {
+  start: number;
+  end: number;
 };
 
 export type HostCategoryStat = {
@@ -106,6 +119,20 @@ function safeAverage(values: number[], fallback = 0): number {
 function secondsToMinutes(value: number): number {
   if (!value || Number.isNaN(value)) return 0;
   return value / 60;
+}
+
+function sumDowntimeForHosts(
+  downtime: Map<string, { total: number; business: number; off: number }>,
+  hostIds: Set<string>,
+  key: "total" | "business" | "off"
+): number {
+  let total = 0;
+  for (const [hostId, entry] of downtime.entries()) {
+    if (hostIds.has(hostId)) {
+      total += entry[key];
+    }
+  }
+  return total;
 }
 
 function classifyHost(host: ZabbixHost): HostCategory {
@@ -225,6 +252,8 @@ function getRangeFromMonth(month: string): {
 
 type BuildOptions = {
   includeGroupStats?: boolean;
+  includeAlertDetails?: boolean;
+  includeAvailabilityInsights?: boolean;
 };
 
 export async function buildDashboardMetrics(
@@ -236,6 +265,9 @@ export async function buildDashboardMetrics(
   options?: BuildOptions
 ): Promise<DashboardMetrics> {
   const includeGroupStats = options?.includeGroupStats ?? false;
+  const includeAlertDetails = options?.includeAlertDetails ?? false;
+  const includeAvailabilityInsights =
+    options?.includeAvailabilityInsights ?? false;
   const { startSeconds, endSeconds, label } = getRangeFromMonth(input.month);
   const problemFetchStart = Math.max(0, startSeconds - PROBLEM_LOOKBACK_SECONDS);
   const [hosts, problems, hostGroups] = await Promise.all([
@@ -279,10 +311,11 @@ export async function buildDashboardMetrics(
       .filter((id): id is string => Boolean(id && id !== "0"))
   );
 
-  const hostDowntime = new Map<
+  let hostDowntime = new Map<
     string,
     { total: number; business: number; off: number }
   >();
+  const hostIntervals = new Map<string, Interval[]>();
   const hostDurationSamples = new Map<
     string,
     { detection: number[]; response: number[]; resolution: number[] }
@@ -297,7 +330,9 @@ export async function buildDashboardMetrics(
     return host.status === undefined || host.status === "0" || host.status === 0;
   }
 
-  const activeHosts = hosts.filter(isActive).length;
+  const activeHostList = hosts.filter(isActive);
+  const activeHostIds = new Set(activeHostList.map((host) => host.hostid));
+  const activeHosts = activeHostList.length;
   const inactiveHostCount = hosts.length - activeHosts;
 
   const groupAccumulators: Map<string, GroupAccumulator> | undefined =
@@ -355,6 +390,7 @@ export async function buildDashboardMetrics(
     const severityKey = Number(problem.severity ?? 0);
     const severityLevel = Number.isFinite(severityKey) ? severityKey : null;
     const shouldCountAlert = startsInsideRange;
+    const isOpen = !problem.r_eventid || problem.r_eventid === "0";
     if (severityLevel !== null && shouldCountAlert) {
       severityTotals[severityLevel] = (severityTotals[severityLevel] ?? 0) + 1;
     }
@@ -383,6 +419,12 @@ export async function buildDashboardMetrics(
     const acknowledges = [...(problem.acknowledges ?? [])].sort((a, b) => {
       return Number(a.clock) - Number(b.clock);
     });
+    const firstAckSeconds =
+      acknowledges.length > 0 ? Number(acknowledges[0].clock) : null;
+    const secondAckSeconds =
+      acknowledges.length > 1
+        ? Number(acknowledges[1].clock)
+        : firstAckSeconds;
     let detectionDelta: number | null = null;
     let responseDelta: number | null = null;
     if (acknowledges.length && hasOverlap) {
@@ -402,6 +444,12 @@ export async function buildDashboardMetrics(
     }
 
     const durationMinutes = secondsToMinutes(durationSeconds);
+    const detectionMinutesDetail =
+      detectionDelta !== null ? secondsToMinutes(detectionDelta) : null;
+    const responseMinutesDetail =
+      secondAckSeconds !== null
+        ? secondsToMinutes(Math.max(0, secondAckSeconds - problemStart))
+        : detectionMinutesDetail;
 
     const shiftDurations = hasOverlap
       ? splitSecondsByShift(problemStart, problemEnd)
@@ -420,8 +468,31 @@ export async function buildDashboardMetrics(
     const highlightHostIds: string[] = [];
     const highlightHostNames: string[] = [];
     const highlightGroupMap = new Map<string, string>();
+    const problemHostNames =
+      problem.hosts?.map((host) => host.name).filter(Boolean) ?? [];
+    const closedAt =
+      !isOpen && resolvedSeconds !== null
+        ? new Date(Math.min(resolvedSeconds, endSeconds) * 1000).toISOString()
+        : null;
+    const closedAtActual =
+      !isOpen && resolvedSeconds !== null
+        ? new Date(resolvedSeconds * 1000).toISOString()
+        : null;
+    const openedAt = Number.isFinite(rawClock)
+      ? new Date(rawClock * 1000).toISOString()
+      : new Date(problemStart * 1000).toISOString();
+    const triggerId = problem.objectid ? String(problem.objectid) : undefined;
+    const firstAckAt =
+      firstAckSeconds !== null
+        ? new Date(firstAckSeconds * 1000).toISOString()
+        : null;
+    const secondAckAt =
+      secondAckSeconds !== null
+        ? new Date(secondAckSeconds * 1000).toISOString()
+        : null;
 
     for (const host of problem.hosts ?? []) {
+      const hostIsActive = activeHostIds.has(host.hostid);
       hostNameMap.set(host.hostid, host.name);
 
       if (shouldCountAlert) {
@@ -437,16 +508,10 @@ export async function buildDashboardMetrics(
         }
       }
 
-      const sample = hostDowntime.get(host.hostid) ?? {
-        total: 0,
-        business: 0,
-        off: 0,
-      };
       if (hasOverlap) {
-        sample.total += durationSeconds;
-        sample.business += shiftDurations.business;
-        sample.off += shiftDurations.off;
-        hostDowntime.set(host.hostid, sample);
+        const intervals = hostIntervals.get(host.hostid) ?? [];
+        intervals.push({ start: problemStart, end: problemEnd });
+        hostIntervals.set(host.hostid, intervals);
       }
 
       const durationSample = hostDurationSamples.get(host.hostid) ?? {
@@ -488,6 +553,23 @@ export async function buildDashboardMetrics(
             if (severityLevel !== null) {
               acc.eventSeverities.set(eventKey, severityLevel);
             }
+            if (includeAlertDetails && !acc.alertDetailIds.has(eventKey)) {
+              acc.alertDetailIds.add(eventKey);
+              acc.alertDetails.push({
+                eventId: eventKey,
+                name: problem.name,
+                severity: severityLevel ?? 0,
+                openedAt: new Date(problemStart * 1000).toISOString(),
+                closedAt,
+                firstAckAt,
+                secondAckAt,
+                detectionMinutes: detectionMinutesDetail,
+                responseMinutes: responseMinutesDetail,
+                resolutionMinutes: durationMinutes,
+                hosts: problemHostNames,
+                isOpen,
+              });
+            }
           }
           if (qualifiesForImpact && eventKey) {
             acc.impactIncidentIds.add(eventKey);
@@ -497,8 +579,25 @@ export async function buildDashboardMetrics(
               (acc.severityCounter[severityLevel] ?? 0) + 1;
           }
           if (hasOverlap) {
-            acc.downtimeTotal += durationSeconds;
-            acc.downtimeBusiness += shiftDurations.business;
+            if (eventKey && hostIsActive) {
+              const alertImpact = acc.alertImpact.get(eventKey) ?? {
+                eventId: eventKey,
+                name: problem.name,
+                severity: severityLevel ?? 0,
+                openedAt,
+                closedAt: closedAtActual,
+                total: 0,
+                business: 0,
+                hostNames: new Set<string>(),
+                triggerId,
+              };
+              alertImpact.total += durationSeconds;
+              alertImpact.business += shiftDurations.business;
+              if (host.name) {
+                alertImpact.hostNames.add(host.name);
+              }
+              acc.alertImpact.set(eventKey, alertImpact);
+            }
             if (detectionDelta !== null) {
               acc.detection.push(detectionDelta);
             }
@@ -536,12 +635,6 @@ export async function buildDashboardMetrics(
     }
 
     if (severityLevel === 5 && shouldCountAlert) {
-      const isOpen = !problem.r_eventid || problem.r_eventid === "0";
-      const closedAt =
-        !isOpen && resolvedSeconds !== null
-          ? new Date(Math.min(resolvedSeconds, endSeconds) * 1000).toISOString()
-          : null;
-
       criticalAlerts.push({
         eventId: String(problem.eventid),
         name: problem.name,
@@ -553,19 +646,43 @@ export async function buildDashboardMetrics(
         openedAt: new Date(problemStart * 1000).toISOString(),
         closedAt,
         isOpen,
-        detectionMinutes:
-          detectionDelta !== null
-            ? secondsToMinutes(detectionDelta)
-            : null,
-        responseMinutes:
-          responseDelta !== null
-            ? secondsToMinutes(responseDelta)
-            : null,
+        detectionMinutes: detectionMinutesDetail,
+        responseMinutes: responseMinutesDetail,
         businessMinutes: secondsToMinutes(shiftDurations.business),
         resolutionMinutes: durationMinutes,
       });
     }
   }
+
+  hostDowntime = buildHostDowntime(hostIntervals);
+
+  if (groupAccumulators) {
+    for (const acc of groupAccumulators.values()) {
+      acc.downtimeTotal = 0;
+      acc.downtimeBusiness = 0;
+      acc.hostDowntime = new Map<string, HostImpactAccumulator>();
+      for (const hostId of acc.activeHostIds) {
+        const downtime = hostDowntime.get(hostId) ?? {
+          total: 0,
+          business: 0,
+          off: 0,
+        };
+        acc.downtimeTotal += downtime.total;
+        acc.downtimeBusiness += downtime.business;
+        acc.hostDowntime.set(hostId, {
+          hostid: hostId,
+          name: hostNameMap.get(hostId) ?? hostId,
+          total: downtime.total,
+          business: downtime.business,
+          off: downtime.off,
+        });
+      }
+    }
+  }
+
+  const triggerTypeMap = includeAvailabilityInsights
+    ? await buildTriggerTypeMapFromProblems(problems)
+    : new Map<string, TriggerTypeInfo>();
 
   const totalProblems = problems.length;
   const truePositives = Math.max(
@@ -573,26 +690,30 @@ export async function buildDashboardMetrics(
     0
   );
 
-  const hostCount = hosts.length;
+  const hostCount = activeHosts;
   const hostFactor = hostCount || 1;
   const totalRangeSeconds = endSeconds - startSeconds;
   const totalHostSeconds = totalRangeSeconds * hostFactor;
-  const totalDowntimeSeconds = Array.from(hostDowntime.values()).reduce(
-    (acc, entry) => acc + entry.total,
-    0
+  const totalDowntimeSeconds = sumDowntimeForHosts(
+    hostDowntime,
+    activeHostIds,
+    "total"
   );
   const rangeShiftSplit = splitSecondsByShift(startSeconds, endSeconds);
   const totalBusinessSeconds = rangeShiftSplit.business;
   const totalOffSeconds = rangeShiftSplit.off;
+  const businessWindowLabel = formatBusinessWindowLabel();
 
-  const businessDowntime = Array.from(hostDowntime.values()).reduce(
-    (acc, entry) => acc + entry.business,
-    0
+  const businessDowntime = sumDowntimeForHosts(
+    hostDowntime,
+    activeHostIds,
+    "business"
   );
 
-  const offDowntime = Array.from(hostDowntime.values()).reduce(
-    (acc, entry) => acc + entry.off,
-    0
+  const offDowntime = sumDowntimeForHosts(
+    hostDowntime,
+    activeHostIds,
+    "off"
   );
 
   const detectionMinutes = secondsToMinutes(safeAverage(detectionDurations));
@@ -619,7 +740,7 @@ export async function buildDashboardMetrics(
       : 100;
 
   const categories = buildHostCategoryStats({
-    hosts,
+    hosts: activeHostList,
     hostDowntime,
     totalRangeSeconds,
   });
@@ -654,6 +775,10 @@ export async function buildDashboardMetrics(
         accumulators: groupAccumulators,
         totalRangeSeconds,
         businessSeconds: totalBusinessSeconds,
+        includeAlertDetails,
+        includeAvailabilityInsights,
+        triggerTypeMap,
+        businessWindowLabel,
       })
     : undefined;
 
@@ -684,7 +809,7 @@ export async function buildDashboardMetrics(
       precisionPct: percentage(truePositives, totalProblems),
     },
     totals: {
-      hosts: hosts.length,
+      hosts: activeHosts,
       coveragePct: 100,
       slaPct: overallAvailability,
     },
@@ -785,12 +910,41 @@ type GroupAccumulator = {
   resolution: number[];
   downtimeTotal: number;
   downtimeBusiness: number;
+  hostDowntime: Map<string, HostImpactAccumulator>;
   eventCount: number;
   openCount: number;
   eventIds: Set<string>;
   openEventIds: Set<string>;
   eventSeverities: Map<string, number>;
   impactIncidentIds: Set<string>;
+  alertImpact: Map<string, AlertImpactAccumulator>;
+  alertDetails: GroupAlertDetail[];
+  alertDetailIds: Set<string>;
+};
+
+type HostImpactAccumulator = {
+  hostid: string;
+  name: string;
+  total: number;
+  business: number;
+  off: number;
+};
+
+type AlertImpactAccumulator = {
+  eventId: string;
+  name: string;
+  severity: number;
+  openedAt: string;
+  closedAt: string | null;
+  total: number;
+  business: number;
+  hostNames: Set<string>;
+  triggerId?: string;
+};
+
+type TriggerTypeInfo = {
+  alertType: string;
+  itemKeys: string[];
 };
 
 function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
@@ -807,12 +961,16 @@ function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
     resolution: [],
     downtimeTotal: 0,
     downtimeBusiness: 0,
+    hostDowntime: new Map<string, HostImpactAccumulator>(),
     eventCount: 0,
     openCount: 0,
     eventIds: new Set<string>(),
     openEventIds: new Set<string>(),
     eventSeverities: new Map<string, number>(),
     impactIncidentIds: new Set<string>(),
+    alertImpact: new Map<string, AlertImpactAccumulator>(),
+    alertDetails: [],
+    alertDetailIds: new Set<string>(),
   };
 }
 
@@ -820,10 +978,18 @@ function buildGroupSummaries({
   accumulators,
   totalRangeSeconds,
   businessSeconds,
+  includeAlertDetails,
+  includeAvailabilityInsights,
+  triggerTypeMap,
+  businessWindowLabel,
 }: {
   accumulators: Map<string, GroupAccumulator>;
   totalRangeSeconds: number;
   businessSeconds: number;
+  includeAlertDetails?: boolean;
+  includeAvailabilityInsights?: boolean;
+  triggerTypeMap?: Map<string, TriggerTypeInfo>;
+  businessWindowLabel: string;
 }): HostGroupMetric[] {
   return Array.from(accumulators.values())
     .filter((acc) => acc.hostIds.size > 0)
@@ -841,6 +1007,14 @@ function buildGroupSummaries({
               totalBusinessSeconds) *
             100
           : 100;
+      const availabilityInsights = includeAvailabilityInsights
+        ? buildAvailabilityInsights(
+            acc,
+            businessSeconds,
+            triggerTypeMap ?? new Map<string, TriggerTypeInfo>(),
+            businessWindowLabel
+          )
+        : undefined;
 
       return {
         groupid: acc.group.groupid,
@@ -871,6 +1045,8 @@ function buildGroupSummaries({
         resolutionMinutes: secondsToMinutes(safeAverage(acc.resolution)),
         availabilityPct,
         businessAvailabilityPct,
+        ...(includeAlertDetails ? { alertDetails: acc.alertDetails } : {}),
+        ...(availabilityInsights ? { availabilityInsights } : {}),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
@@ -930,4 +1106,203 @@ function buildHostCategoryStats({
       slaPct: sla,
     };
   });
+}
+
+const MAX_INSIGHT_ITEMS = 5;
+
+function buildHostDowntime(
+  hostIntervals: Map<string, Interval[]>
+): Map<string, { total: number; business: number; off: number }> {
+  const downtime = new Map<string, { total: number; business: number; off: number }>();
+  for (const [hostId, intervals] of hostIntervals.entries()) {
+    if (!intervals.length) {
+      downtime.set(hostId, { total: 0, business: 0, off: 0 });
+      continue;
+    }
+    const merged = mergeIntervals(intervals);
+    let total = 0;
+    let business = 0;
+    let off = 0;
+    for (const interval of merged) {
+      const duration = Math.max(0, interval.end - interval.start);
+      if (!duration) continue;
+      total += duration;
+      const split = splitSecondsByShift(interval.start, interval.end);
+      business += split.business;
+      off += split.off;
+    }
+    downtime.set(hostId, { total, business, off });
+  }
+  return downtime;
+}
+
+function mergeIntervals(intervals: Interval[]): Interval[] {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  const merged: Interval[] = [];
+  for (const interval of sorted) {
+    if (!merged.length) {
+      merged.push({ ...interval });
+      continue;
+    }
+    const last = merged[merged.length - 1];
+    if (interval.start <= last.end) {
+      last.end = Math.max(last.end, interval.end);
+    } else {
+      merged.push({ ...interval });
+    }
+  }
+  return merged;
+}
+
+function buildAvailabilityInsights(
+  acc: GroupAccumulator,
+  businessSeconds: number,
+  triggerTypeMap: Map<string, TriggerTypeInfo>,
+  businessWindowLabel: string
+): AvailabilityInsights {
+  const totalBusinessDowntime = acc.downtimeBusiness;
+  const totalBusinessMinutes = secondsToMinutes(totalBusinessDowntime);
+
+  const topHosts: AvailabilityHostImpact[] = Array.from(
+    acc.hostDowntime.values()
+  )
+    .filter((entry) => entry.business > 0)
+    .sort((a, b) => b.business - a.business)
+    .slice(0, MAX_INSIGHT_ITEMS)
+    .map((entry) => ({
+      hostid: entry.hostid,
+      name: entry.name,
+      businessDowntimeMinutes: secondsToMinutes(entry.business),
+      totalDowntimeMinutes: secondsToMinutes(entry.total),
+      businessAvailabilityPct:
+        businessSeconds > 0
+          ? ((businessSeconds - entry.business) / businessSeconds) * 100
+          : 100,
+      shareOfGroupBusinessDowntimePct: totalBusinessDowntime
+        ? (entry.business / totalBusinessDowntime) * 100
+        : 0,
+    }));
+
+  const topAlerts: AvailabilityAlertImpact[] = Array.from(
+    acc.alertImpact.values()
+  )
+    .filter((entry) => entry.business > 0)
+    .sort((a, b) => b.business - a.business)
+    .slice(0, MAX_INSIGHT_ITEMS)
+    .map((entry) => {
+      const fallback = deriveAlertType([], entry.name);
+      const triggerInfo = entry.triggerId
+        ? triggerTypeMap.get(entry.triggerId)
+        : null;
+      const info = triggerInfo ?? fallback;
+      const hostNames = Array.from(entry.hostNames).sort((a, b) =>
+        a.localeCompare(b, "pt-BR")
+      );
+      const itemKeys = [...info.itemKeys].sort((a, b) =>
+        a.localeCompare(b)
+      );
+      return {
+        eventId: entry.eventId,
+        triggerId: entry.triggerId,
+        name: entry.name,
+        severity: entry.severity,
+        openedAt: entry.openedAt,
+        closedAt: entry.closedAt,
+        businessDowntimeMinutes: secondsToMinutes(entry.business),
+        totalDowntimeMinutes: secondsToMinutes(entry.total),
+        shareOfGroupBusinessDowntimePct: totalBusinessDowntime
+          ? (entry.business / totalBusinessDowntime) * 100
+          : 0,
+        hostNames,
+        alertType: info.alertType,
+        itemKeys,
+      };
+    });
+
+  return {
+    businessWindowLabel,
+    groupBusinessDowntimeMinutes: totalBusinessMinutes,
+    topHosts,
+    topAlerts,
+  };
+}
+
+async function buildTriggerTypeMapFromProblems(
+  problems: ZabbixProblem[]
+): Promise<Map<string, TriggerTypeInfo>> {
+  const triggerIds = Array.from(
+    new Set(
+      problems
+        .map((problem) => problem.objectid)
+        .filter((id): id is string => Boolean(id && id !== "0"))
+    )
+  );
+  if (!triggerIds.length) {
+    return new Map<string, TriggerTypeInfo>();
+  }
+
+  const triggers = await fetchTriggersByIds(triggerIds);
+  return buildTriggerTypeMap(triggers);
+}
+
+function buildTriggerTypeMap(
+  triggers: ZabbixTrigger[]
+): Map<string, TriggerTypeInfo> {
+  const map = new Map<string, TriggerTypeInfo>();
+  for (const trigger of triggers) {
+    const text = [trigger.description, trigger.comments].filter(Boolean).join(" ");
+    map.set(
+      trigger.triggerid,
+      deriveAlertType(trigger.items ?? [], text)
+    );
+  }
+  return map;
+}
+
+function deriveAlertType(
+  items: ZabbixItem[],
+  fallbackText: string
+): TriggerTypeInfo {
+  const itemKeys = Array.from(
+    new Set(
+      items
+        .map((item) => item.key_)
+        .filter((key): key is string => Boolean(key))
+    )
+  );
+  const haystack = `${itemKeys.join(" ")} ${fallbackText}`.toLowerCase();
+
+  if (haystack.includes("icmpping") || haystack.includes("icmp")) {
+    return { alertType: "ICMP", itemKeys };
+  }
+  if (haystack.includes("snmp")) {
+    return { alertType: "SNMP", itemKeys };
+  }
+  if (haystack.includes("agent")) {
+    return { alertType: "Zabbix agent", itemKeys };
+  }
+  if (haystack.includes("http") || haystack.includes("web")) {
+    return { alertType: "HTTP", itemKeys };
+  }
+  if (
+    haystack.includes("net.tcp") ||
+    haystack.includes("tcp") ||
+    haystack.includes("udp")
+  ) {
+    return { alertType: "Porta/TCP", itemKeys };
+  }
+  if (haystack.includes("log")) {
+    return { alertType: "Log", itemKeys };
+  }
+  if (haystack.includes("system.uptime")) {
+    return { alertType: "Uptime", itemKeys };
+  }
+
+  return { alertType: "Outro", itemKeys };
+}
+
+function formatBusinessWindowLabel(): string {
+  const startLabel = `${BUSINESS_START_HOUR}h`;
+  const endLabel = BUSINESS_END_HOUR >= 24 ? "23:59" : `${BUSINESS_END_HOUR}h`;
+  return `${startLabel}-${endLabel} (${DEFAULT_TIMEZONE})`;
 }

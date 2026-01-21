@@ -22,6 +22,7 @@ import {
   Timer,
 } from "lucide-react";
 import {
+  AvailabilityInsights,
   OpenProblemDetail,
   CriticalAlertHighlight,
   DashboardMetrics,
@@ -29,11 +30,13 @@ import {
   HostGroupMetric,
   HostGroupOption,
   SeveritySummary,
+  GroupAlertDetail,
 } from "@/types/dashboard";
 import { SeverityTable } from "@/components/severity-table";
 import { sumContractedHostsByName } from "@/lib/contracted-hosts";
 
 const MONTH_OPTIONS = buildMonthOptions(12);
+const FILTER_STORAGE_KEY = "noc-dashboard:filters";
 const SORT_FIELDS: Array<{ label: string; value: GroupSortField }> = [
   { label: "Nome", value: "name" },
   { label: "Alertas", value: "alerts" },
@@ -106,6 +109,43 @@ export function GlobalOverview() {
   const [singleLoading, setSingleLoading] = useState(false);
   const [groupError, setGroupError] = useState<string | null>(null);
   const [singleError, setSingleError] = useState<string | null>(null);
+  const restoredFilters = useRef(false);
+
+  useEffect(() => {
+    if (restoredFilters.current) return;
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          month?: string;
+          selectedGroups?: string[];
+        };
+        if (
+          parsed.month &&
+          MONTH_OPTIONS.some((option) => option.value === parsed.month)
+        ) {
+          setMonth(parsed.month);
+        }
+        if (Array.isArray(parsed.selectedGroups)) {
+          setSelectedGroups(parsed.selectedGroups);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    } finally {
+      restoredFilters.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const payload = {
+      month,
+      selectedGroups,
+    };
+    window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(payload));
+  }, [month, selectedGroups]);
 
   useEffect(() => {
     fetch("/api/host-groups")
@@ -346,6 +386,54 @@ export function GlobalOverview() {
     );
   }, [singleGroupData, hostSortField, sortOrder]);
 
+  const [hostRosterOpen, setHostRosterOpen] = useState(false);
+  const [hostRoster, setHostRoster] = useState<
+    Array<{
+      hostid: string;
+      name: string;
+      status: string;
+      groups: string[];
+      interfaces: Array<{ ip?: string; dns?: string; port?: string }>;
+      proxy: string;
+    }>
+  >([]);
+  const [hostRosterLoading, setHostRosterLoading] = useState(false);
+  const [hostRosterError, setHostRosterError] = useState<string | null>(null);
+
+  const handleHostsClick = () => {
+    setHostRosterOpen(true);
+    setHostRosterLoading(true);
+    setHostRosterError(null);
+    const params = new URLSearchParams();
+    if (selectedGroups.length) {
+      params.set("groupIds", selectedGroups.join(","));
+    }
+    fetch(`/api/host-roster?${params.toString()}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error ?? response.statusText);
+        }
+        const payload = (await response.json()) as {
+          hosts: Array<{
+            hostid: string;
+            name: string;
+            status: string;
+            groups: string[];
+          }>;
+        };
+        setHostRoster(payload.hosts);
+      })
+      .catch((error) => {
+        setHostRosterError(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível carregar os hosts."
+        );
+      })
+      .finally(() => setHostRosterLoading(false));
+  };
+
   const isSingleGroupSelection = selectedGroups.length === 1;
   const isSingleGroupMode = isSingleGroupSelection && Boolean(singleGroupData);
 
@@ -430,6 +518,7 @@ export function GlobalOverview() {
     : filteredSummary?.severitySummary ??
       groupData?.severitySummary ??
       null;
+  const zabbixBaseUrl = groupData?.meta?.zabbixBaseUrl ?? null;
 
   const severityContext = useMemo(() => {
     const periodRange = buildPeriodRangeLabel(month);
@@ -646,6 +735,7 @@ export function GlobalOverview() {
         selectedGroups={selectedGroups}
         selectedGroupNames={selectedGroupNames}
         disasterAlerts={disasterAlerts}
+        onHostsClick={handleHostsClick}
       />
 
       <SeverityTable summary={severitySummaryData} context={severityContext} />
@@ -659,8 +749,21 @@ export function GlobalOverview() {
       {isSingleGroupSelection ? (
         <HostTable rows={filteredHosts} loading={loading} />
       ) : (
-        <GroupTable rows={filteredGroups} loading={loading} />
+        <GroupTable
+          rows={filteredGroups}
+          loading={loading}
+          zabbixBaseUrl={zabbixBaseUrl}
+        />
       )}
+
+      <HostRosterModal
+        open={hostRosterOpen}
+        onClose={() => setHostRosterOpen(false)}
+        hosts={hostRoster}
+        loading={hostRosterLoading}
+        error={hostRosterError}
+        selectedGroupNames={selectedGroupNames}
+      />
     </section>
   );
 }
@@ -1120,6 +1223,7 @@ function OverviewCards({
   selectedGroups,
   selectedGroupNames,
   disasterAlerts,
+  onHostsClick,
 }: {
   loading: boolean;
   source: OverviewCardSource;
@@ -1129,6 +1233,7 @@ function OverviewCards({
   selectedGroups: string[];
   selectedGroupNames: string[];
   disasterAlerts: CriticalAlertHighlight[];
+  onHostsClick: () => void;
 }) {
   const [showOpenAlerts, setShowOpenAlerts] = useState(false);
   const [openAlerts, setOpenAlerts] = useState<OpenProblemDetail[] | null>(null);
@@ -1293,11 +1398,13 @@ function OverviewCards({
               );
 
               const isClickableCard =
-                isOpenAlertsCard || isImpactIncidentsCard;
+                isOpenAlertsCard || isImpactIncidentsCard || definition.id === "hosts";
               const handleClick = isOpenAlertsCard
                 ? handleOpenAlertsClick
                 : isImpactIncidentsCard
                 ? handleImpactIncidentsClick
+                : definition.id === "hosts"
+                ? onHostsClick
                 : undefined;
 
               return isClickableCard && handleClick ? (
@@ -1346,9 +1453,11 @@ function OverviewCards({
 function GroupTable({
   rows,
   loading,
+  zabbixBaseUrl,
 }: {
   rows: HostGroupMetric[];
   loading: boolean;
+  zabbixBaseUrl: string | null;
 }) {
   const AVAILABILITY_TARGET = 99.5;
   const BUSINESS_AVAILABILITY_TARGET = 99.0;
@@ -1357,6 +1466,15 @@ function GroupTable({
     "all" | "below" | "within"
   >("all");
   const [exporting, setExporting] = useState(false);
+  const [selectedAlerts, setSelectedAlerts] =
+    useState<GroupAlertDetail[] | null>(null);
+  const [selectedGroupLabel, setSelectedGroupLabel] = useState<string | null>(
+    null
+  );
+  const [availabilityModal, setAvailabilityModal] = useState<{
+    groupLabel: string;
+    insights: AvailabilityInsights | null;
+  } | null>(null);
   const exportTargetRef = useRef<HTMLDivElement | null>(null);
   const textPrimaryClass = exporting ? "text-white" : "text-slate-800";
   const COLUMN_DIVIDER_CLASS = exporting
@@ -1386,6 +1504,13 @@ function GroupTable({
   }, [rows, businessFilter, businessSort]);
 
   const hasFilterApplied = businessFilter !== "all";
+
+  const handleAvailabilityDetails = (group: HostGroupMetric) => {
+    setAvailabilityModal({
+      groupLabel: group.name,
+      insights: group.availabilityInsights ?? null,
+    });
+  };
 
   const handleExport = async () => {
     if (!exportTargetRef.current) return;
@@ -1595,7 +1720,28 @@ function GroupTable({
                   <td
                     className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
                   >
-                    {group.alerts}
+                    {group.alerts > 0 ? (
+                      <button
+                        type="button"
+                        className="font-semibold text-blue-700 underline decoration-dotted underline-offset-4 transition hover:text-blue-900"
+                        onClick={() => {
+                          if (group.alertDetails?.length) {
+                            setSelectedGroupLabel(group.name);
+                            setSelectedAlerts(
+                              [...group.alertDetails].sort(
+                                (a, b) =>
+                                  new Date(b.openedAt).getTime() -
+                                  new Date(a.openedAt).getTime()
+                              )
+                            );
+                          }
+                        }}
+                      >
+                        {group.alerts}
+                      </button>
+                    ) : (
+                      group.alerts
+                    )}
                   </td>
                   <td
                     className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
@@ -1630,12 +1776,582 @@ function GroupTable({
                       target={BUSINESS_AVAILABILITY_TARGET}
                       label="Comercial"
                       exporting={exporting}
+                      onDetailsClick={() => handleAvailabilityDetails(group)}
                     />
                   </td>
                 </tr>
-              ))}
+            ))}
           </tbody>
         </table>
+      </div>
+      <AlertDetailsModal
+        open={Boolean(selectedAlerts)}
+        onClose={() => {
+          setSelectedAlerts(null);
+          setSelectedGroupLabel(null);
+        }}
+        alerts={selectedAlerts ?? []}
+        groupLabel={selectedGroupLabel ?? ""}
+      />
+      <AvailabilityInsightsModal
+        open={Boolean(availabilityModal)}
+        onClose={() => setAvailabilityModal(null)}
+        groupLabel={availabilityModal?.groupLabel ?? ""}
+        insights={availabilityModal?.insights ?? null}
+        zabbixBaseUrl={zabbixBaseUrl}
+      />
+    </div>
+  );
+}
+
+type AlertDetailsModalProps = {
+  open: boolean;
+  onClose: () => void;
+  alerts: GroupAlertDetail[];
+  groupLabel: string;
+};
+
+function AlertDetailsModal({
+  open,
+  onClose,
+  alerts,
+  groupLabel,
+}: AlertDetailsModalProps) {
+  if (!open) return null;
+
+  const sorted = [...alerts].sort(
+    (a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime()
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8">
+      <div className="max-h-[80vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
+              Alertas do grupo
+            </p>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {groupLabel || "Host group"}
+            </h3>
+            <p className="text-sm text-slate-500">
+              Abertura, ACKs e encerramento com tempos em minutos.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+          >
+            Fechar
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
+          {sorted.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Nenhum alerta com detalhes retornado para este grupo no período.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-100 text-sm text-slate-700">
+                <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-3 text-left">Alerta</th>
+                    <th className="px-3 py-3 text-left">Hosts</th>
+                    <th className="px-3 py-3 text-left">Abertura</th>
+                    <th className="px-3 py-3 text-left">1o ACK</th>
+                    <th className="px-3 py-3 text-left">2o ACK</th>
+                    <th className="px-3 py-3 text-left">Fechamento</th>
+                    <th className="px-3 py-3 text-right">Detecção (min)</th>
+                    <th className="px-3 py-3 text-right">Resposta (min)</th>
+                    <th className="px-3 py-3 text-right">Resolução (min)</th>
+                    <th className="px-3 py-3 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {sorted.map((alert) => (
+                    <tr key={alert.eventId} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-3 align-top text-sm font-semibold text-slate-900">
+                        <div>{alert.name}</div>
+                        <p className="text-[11px] text-slate-500">
+                          #{alert.eventId} — Severidade {alert.severity}
+                        </p>
+                      </td>
+                      <td className="px-3 py-3 align-top text-sm text-slate-700">
+                        {alert.hosts.length
+                          ? alert.hosts.join(", ")
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-3 align-top text-sm font-semibold text-slate-800">
+                        {formatAlertDate(alert.openedAt)}
+                      </td>
+                      <td className="px-3 py-3 align-top text-sm font-semibold text-slate-800">
+                        {formatAlertDate(alert.firstAckAt)}
+                      </td>
+                      <td className="px-3 py-3 align-top text-sm font-semibold text-slate-800">
+                        {formatAlertDate(alert.secondAckAt)}
+                      </td>
+                      <td className="px-3 py-3 align-top text-sm font-semibold text-slate-800">
+                        {formatAlertDate(alert.closedAt)}
+                      </td>
+                      <td className="px-3 py-3 align-top text-right text-sm font-semibold text-slate-900">
+                        {formatMinutesOrDash(alert.detectionMinutes)}
+                      </td>
+                      <td className="px-3 py-3 align-top text-right text-sm font-semibold text-slate-900">
+                        {formatMinutesOrDash(alert.responseMinutes)}
+                      </td>
+                      <td className="px-3 py-3 align-top text-right text-sm font-semibold text-slate-900">
+                        {formatMinutesOrDash(alert.resolutionMinutes)}
+                      </td>
+                      <td className="px-3 py-3 align-top">
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                            alert.isOpen
+                              ? "bg-rose-50 text-rose-700 ring-1 ring-rose-100"
+                              : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+                          }`}
+                        >
+                          {alert.isOpen ? "Em aberto" : "Resolvido"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type AvailabilityInsightsModalProps = {
+  open: boolean;
+  onClose: () => void;
+  groupLabel: string;
+  insights: AvailabilityInsights | null;
+  zabbixBaseUrl: string | null;
+};
+
+function AvailabilityInsightsModal({
+  open,
+  onClose,
+  groupLabel,
+  insights,
+  zabbixBaseUrl,
+}: AvailabilityInsightsModalProps) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8">
+      <div className="max-h-[85vh] w-full max-w-6xl overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
+              Disponibilidade (7h-23:59)
+            </p>
+            <h3 className="text-lg font-semibold text-slate-900">
+              Detalhamento - {groupLabel || "Host group"}
+            </h3>
+            {insights?.businessWindowLabel && (
+              <p className="text-sm text-slate-500">
+                Janela comercial: {insights.businessWindowLabel}
+              </p>
+            )}
+            {insights && (
+              <p className="text-sm text-slate-500">
+                <span
+                  title="Soma do downtime por host na janela comercial, sem sobreposicoes por host."
+                  className="cursor-help underline decoration-dotted underline-offset-4"
+                >
+                  Downtime comercial total
+                </span>
+                :{" "}
+                <span className="font-semibold text-slate-900">
+                  {formatDurationMinutes(insights.groupBusinessDowntimeMinutes)}
+                </span>
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+          >
+            Fechar
+          </button>
+        </div>
+        <div className="max-h-[72vh] overflow-y-auto px-6 py-5">
+          {!insights ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+              Nao ha dados suficientes para explicar a disponibilidade neste periodo.
+            </div>
+          ) : (
+            <div className="space-y-8">
+              <section className="space-y-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+                    Hosts mais impactados
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    Ranking por downtime dentro da janela comercial.
+                  </p>
+                </div>
+                {insights.topHosts.length === 0 ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    Nenhum downtime comercial registrado para este grupo.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+                    <table className="min-w-full divide-y divide-slate-100 text-sm text-slate-700">
+                      <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-3 py-3 text-left">
+                            <span
+                              title="Host monitorado no Zabbix."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Host
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-right">
+                            <span
+                              title="Tempo acumulado de indisponibilidade dentro da janela comercial, sem sobreposicoes."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Downtime (comercial)
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-right">
+                            <span
+                              title="Participacao deste host no downtime comercial total do grupo."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              % do grupo
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-right">
+                            <span
+                              title="Disponibilidade do host na janela comercial: 1 - (downtime comercial / tempo comercial do periodo)."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Disponibilidade
+                            </span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {insights.topHosts.map((host) => (
+                          <tr key={host.hostid} className="hover:bg-slate-50/70">
+                            <td className="px-3 py-3 font-semibold text-slate-900">
+                              {host.name}
+                            </td>
+                            <td className="px-3 py-3 text-right font-semibold text-slate-900">
+                              {formatDurationMinutes(host.businessDowntimeMinutes)}
+                            </td>
+                            <td className="px-3 py-3 text-right text-slate-600">
+                              {host.shareOfGroupBusinessDowntimePct.toFixed(1)}%
+                            </td>
+                            <td className="px-3 py-3 text-right font-semibold text-slate-900">
+                              {host.businessAvailabilityPct.toFixed(2)}%
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <section className="space-y-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
+                    Alertas que mais impactaram
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    Agrupado por alerta, com tipo e item associados ao trigger.
+                  </p>
+                </div>
+                {insights.topAlerts.length === 0 ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    Nenhum alerta com impacto comercial identificado no periodo.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+                    <table className="min-w-full divide-y divide-slate-100 text-sm text-slate-700">
+                      <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-3 py-3 text-left">
+                            <span
+                              title="Nome do problema/trigger no Zabbix."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Alerta
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-left">
+                            <span
+                              title="Tipo inferido pelo item/trigger do Zabbix (ex.: ICMP, SNMP, Agent)."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Tipo / Item
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-left">
+                            <span
+                              title="Hosts impactados por este alerta."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Hosts
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-left">
+                            <span
+                              title="Data/hora de abertura do alerta."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Abertura
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-left">
+                            <span
+                              title="Data/hora de fechamento (ou em aberto)."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Fechamento
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-right">
+                            <span
+                              title="Tempo do alerta dentro da janela comercial. Pode sobrepor outros alertas."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              Downtime (comercial)
+                            </span>
+                          </th>
+                          <th className="px-3 py-3 text-right">
+                            <span
+                              title="Participacao deste alerta no downtime comercial total do grupo (nao desconta sobreposicoes)."
+                              className="cursor-help underline decoration-dotted underline-offset-4"
+                            >
+                              % do grupo
+                            </span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {insights.topAlerts.map((alert) => {
+                          const zabbixUrl = buildZabbixEventUrl(
+                            zabbixBaseUrl,
+                            alert.eventId,
+                            alert.triggerId
+                          );
+                          return (
+                            <tr key={alert.eventId} className="hover:bg-slate-50/70">
+                              <td className="px-3 py-3">
+                                <p className="font-semibold text-slate-900">
+                                  {alert.name}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {zabbixUrl ? (
+                                    <a
+                                      href={zabbixUrl}
+                                      target="_blank"
+                                      rel="noreferrer noopener"
+                                      className="font-semibold text-blue-600 hover:text-blue-700"
+                                      title="Abrir no Zabbix"
+                                    >
+                                      #{alert.eventId}
+                                    </a>
+                                  ) : (
+                                    <>#{alert.eventId}</>
+                                  )}{" "}
+                                  - Sev {alert.severity}
+                                </p>
+                              </td>
+                            <td className="px-3 py-3">
+                              <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                                {alert.alertType}
+                              </div>
+                              <div className="text-xs text-slate-600">
+                                {formatListPreview(alert.itemKeys) || "Nao informado"}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-xs text-slate-600">
+                              {formatListPreview(alert.hostNames) || "Sem host"}
+                            </td>
+                            <td className="px-3 py-3 text-xs font-semibold text-slate-800">
+                              {formatAlertDate(alert.openedAt)}
+                            </td>
+                            <td className="px-3 py-3 text-xs font-semibold text-slate-800">
+                              {alert.closedAt ? formatAlertDate(alert.closedAt) : "Em aberto"}
+                            </td>
+                            <td className="px-3 py-3 text-right font-semibold text-slate-900">
+                              {formatDurationMinutes(alert.businessDowntimeMinutes)}
+                            </td>
+                            <td className="px-3 py-3 text-right text-slate-600">
+                              {alert.shareOfGroupBusinessDowntimePct.toFixed(1)}%
+                            </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type HostRosterModalProps = {
+  open: boolean;
+  onClose: () => void;
+  hosts: Array<{
+    hostid: string;
+    name: string;
+    status: string;
+    groups: string[];
+    interfaces: Array<{ ip?: string; dns?: string; port?: string }>;
+    proxy: string;
+  }>;
+  loading: boolean;
+  error: string | null;
+  selectedGroupNames: string[];
+};
+
+function HostRosterModal({
+  open,
+  onClose,
+  hosts,
+  loading,
+  error,
+  selectedGroupNames,
+}: HostRosterModalProps) {
+  if (!open) return null;
+
+  const activeCount = hosts.filter((host) => host.status === "0" || host.status === 0).length;
+  const clientLabel =
+    selectedGroupNames.length === 1
+      ? selectedGroupNames[0]
+      : selectedGroupNames.length > 1
+      ? `${selectedGroupNames.length} clientes`
+      : "Todos os clientes";
+
+  const exportCsv = () => {
+    const header = ["hostid", "nome", "status", "ip", "proxy", "grupos"];
+    const rows = hosts.map((host) => [
+      host.hostid,
+      csvSafe(host.name),
+      host.status === "0" || host.status === 0 ? "Ativo" : "Inativo",
+      csvSafe(getPrimaryIp(host)),
+      csvSafe(host.proxy ?? ""),
+      csvSafe(host.groups.join(" | ")),
+    ]);
+    const csv = [header.join(","), ...rows.map((row) => row.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `hosts-${Date.now()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8">
+      <div className="max-h-[85vh] w-full max-w-6xl overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-black/10">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
+              Hosts monitorados
+            </p>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {clientLabel} — {hosts.length} hosts ({activeCount} ativos)
+            </h3>
+            <p className="text-sm text-slate-500">
+              Clique em exportar para gerar CSV e enviar ao cliente.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={loading || !hosts.length}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Exportar CSV
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+        <div className="max-h-[72vh] overflow-y-auto px-6 py-4">
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="h-10 animate-pulse rounded-2xl bg-slate-100" />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {error}
+            </div>
+          ) : hosts.length === 0 ? (
+            <p className="text-sm text-slate-500">Nenhum host encontrado para o filtro.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-slate-100 text-sm text-slate-700">
+                <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-3 text-left">Host</th>
+                    <th className="px-3 py-3 text-left">IP</th>
+                    <th className="px-3 py-3 text-left">Proxy</th>
+                    <th className="px-3 py-3 text-left">Status</th>
+                    <th className="px-3 py-3 text-left">Grupos</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {hosts.map((host) => (
+                    <tr key={host.hostid} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-3 text-sm font-semibold text-slate-900">{host.name}</td>
+                      <td className="px-3 py-3 text-sm text-slate-800">
+                        {getPrimaryIp(host) || "—"}
+                      </td>
+                      <td className="px-3 py-3 text-sm text-slate-800">
+                        {host.proxy || "—"}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                            host.status === "0" || host.status === 0
+                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+                              : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                          }`}
+                        >
+                          {host.status === "0" || host.status === 0 ? "Ativo" : "Inativo"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-sm text-slate-700">
+                        {host.groups.length ? host.groups.join(", ") : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1679,11 +2395,13 @@ function AvailabilityCell({
   target,
   label,
   exporting = false,
+  onDetailsClick,
 }: {
   value: number;
   target: number;
   label: string;
   exporting?: boolean;
+  onDetailsClick?: () => void;
 }) {
   const clamped = Math.max(0, Math.min(value, 100));
   const belowTarget = clamped < target;
@@ -1722,6 +2440,17 @@ function AvailabilityCell({
           {clamped.toFixed(2)}%
         </span>
       </div>
+      {onDetailsClick && !exporting && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onDetailsClick}
+            className="mt-2 inline-flex items-center text-[11px] font-semibold text-blue-600 transition hover:text-blue-800"
+          >
+            Detalhar
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2225,6 +2954,21 @@ function formatMinutesOrDash(value: number | null | undefined) {
   return formatted || "0";
 }
 
+function formatDurationMinutes(totalMinutes: number) {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) {
+    return "0 min";
+  }
+  const rounded = Math.round(totalMinutes);
+  const days = Math.floor(rounded / (60 * 24));
+  const hours = Math.floor((rounded % (60 * 24)) / 60);
+  const mins = rounded % 60;
+  const segments: string[] = [];
+  if (days) segments.push(`${days}d`);
+  if (hours) segments.push(`${hours}h`);
+  if (mins && segments.length < 2) segments.push(`${mins}min`);
+  return segments.join(" ");
+}
+
 function formatListPreview(values: string[]) {
   if (!values.length) {
     return "";
@@ -2238,12 +2982,48 @@ function formatListPreview(values: string[]) {
 }
 
 function formatAlertDate(value: string | null) {
-  if (!value) return "—";
+  if (!value) return "-";
   try {
     return format(new Date(value), "dd/MM HH:mm");
   } catch {
-    return "—";
+    return "-";
   }
+}
+
+function buildZabbixEventUrl(
+  baseUrl: string | null | undefined,
+  eventId: string,
+  triggerId?: string | null
+) {
+  if (!baseUrl || !eventId) return null;
+  const normalized = baseUrl.replace(/\/$/, "");
+  const params = new URLSearchParams();
+  if (triggerId) {
+    params.set("triggerid", triggerId);
+  }
+  params.set("eventid", eventId);
+  return `${normalized}/tr_events.php?${params.toString()}`;
+}
+
+function csvSafe(value: string) {
+  if (!value) return "";
+  const normalized = value.replace(/"/g, '""');
+  if (
+    normalized.includes(",") ||
+    normalized.includes('"') ||
+    normalized.includes("\n")
+  ) {
+    return `"${normalized}"`;
+  }
+  return normalized;
+}
+
+function getPrimaryIp(host: {
+  interfaces?: Array<{ ip?: string; dns?: string; port?: string }>;
+}) {
+  if (!host.interfaces || !host.interfaces.length) return "";
+  const iface = host.interfaces.find((item) => item.ip) ?? host.interfaces[0];
+  return iface.ip || iface.dns || "";
 }
 
 function filterCriticalAlerts({

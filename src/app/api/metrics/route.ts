@@ -10,6 +10,7 @@ const querySchema = z.object({
     .regex(/^\d{4}-\d{2}$/)
     .optional(),
   groupId: z.string().optional(),
+  groupIds: z.string().optional(),
 });
 
 export async function GET(request: Request) {
@@ -17,6 +18,7 @@ export async function GET(request: Request) {
   const parseResult = querySchema.safeParse({
     month: searchParams.get("month") ?? undefined,
     groupId: searchParams.get("groupId") ?? undefined,
+    groupIds: searchParams.get("groupIds") ?? undefined,
   });
 
   if (!parseResult.success) {
@@ -29,16 +31,23 @@ export async function GET(request: Request) {
     );
   }
 
-  const { month, groupId } = parseResult.data;
+  const { month, groupId, groupIds } = parseResult.data;
 
   const selectedMonth =
     month ??
     new Date().toISOString().slice(0, 7); /* formato AAAA-MM */
+  const parsedGroupIds = groupIds
+    ? groupIds
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : undefined;
 
   try {
     const metrics = await buildDashboardMetrics({
       month: selectedMonth,
       groupId: groupId || undefined,
+      groupIds: parsedGroupIds,
     });
     return NextResponse.json({ metrics });
   } catch (error) {

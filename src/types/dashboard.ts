@@ -23,6 +23,37 @@ export type HostMetric = {
   businessAvailabilityPct: number;
 };
 
+export type AvailabilityHostImpact = {
+  hostid: string;
+  name: string;
+  businessDowntimeMinutes: number;
+  totalDowntimeMinutes: number;
+  businessAvailabilityPct: number;
+  shareOfGroupBusinessDowntimePct: number;
+};
+
+export type AvailabilityAlertImpact = {
+  eventId: string;
+  triggerId?: string;
+  name: string;
+  severity: number;
+  openedAt: string;
+  closedAt: string | null;
+  businessDowntimeMinutes: number;
+  totalDowntimeMinutes: number;
+  shareOfGroupBusinessDowntimePct: number;
+  hostNames: string[];
+  alertType: string;
+  itemKeys: string[];
+};
+
+export type AvailabilityInsights = {
+  businessWindowLabel: string;
+  groupBusinessDowntimeMinutes: number;
+  topHosts: AvailabilityHostImpact[];
+  topAlerts: AvailabilityAlertImpact[];
+};
+
 export type CriticalAlertHighlight = {
   eventId: string;
   name: string;
@@ -74,11 +105,13 @@ export type HostGroupMetric = {
   openEventIds?: string[];
   eventSeverities?: EventSeveritySample[];
   impactIncidentIds?: string[];
+  alertDetails?: GroupAlertDetail[];
   detectionMinutes: number;
   responseMinutes: number;
   resolutionMinutes: number;
   availabilityPct: number;
   businessAvailabilityPct: number;
+  availabilityInsights?: AvailabilityInsights;
 };
 
 export type DashboardMetrics = {
@@ -133,6 +166,7 @@ export type GroupMetricsApiResponse = {
   meta: {
     period: string;
     generatedAt: string;
+    zabbixBaseUrl?: string;
   };
   kpis: DashboardMetrics["kpis"];
   availability: DashboardMetrics["availability"];
@@ -170,4 +204,19 @@ export type GroupAlertRecord = {
   firstAckAt: string | null;
   secondAckAt: string | null;
   secondAckMinutes: number | null;
+};
+
+export type GroupAlertDetail = {
+  eventId: string;
+  name: string;
+  severity: number;
+  openedAt: string;
+  closedAt: string | null;
+  firstAckAt: string | null;
+  secondAckAt: string | null;
+  detectionMinutes: number | null;
+  responseMinutes: number | null;
+  resolutionMinutes: number;
+  hosts: string[];
+  isOpen: boolean;
 };

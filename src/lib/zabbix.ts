@@ -29,6 +29,7 @@ export type ZabbixHost = {
   name: string;
   status?: string;
   proxy_hostid?: string;
+  interfaces?: Array<{ ip?: string; dns?: string; port?: string }>;
   inventory?: {
     type?: string;
     type_full?: string;
@@ -61,6 +62,7 @@ export type ZabbixAcknowledge = {
 export type ZabbixProblem = {
   eventid: string;
   r_eventid?: string;
+  objectid?: string;
   clock: string;
   ns: string;
   name: string;
@@ -78,10 +80,29 @@ export type ZabbixEvent = {
   r_eventid?: string;
 };
 
+export type ZabbixItem = {
+  itemid: string;
+  key_?: string;
+  name?: string;
+};
+
+export type ZabbixTrigger = {
+  triggerid: string;
+  description?: string;
+  comments?: string;
+  items?: ZabbixItem[];
+};
+
 const API_URL =
   process.env.ZABBIX_API_URL ??
   process.env.ZABBIX_API_ENDPOINT ??
   "https://noc.contego.com.br/api_jsonrpc.php";
+
+const UI_URL =
+  process.env.ZABBIX_BASE_URL ??
+  process.env.ZABBIX_UI_URL ??
+  process.env.ZABBIX_WEB_URL ??
+  process.env.ZABBIX_URL;
 
 const API_TOKEN = process.env.ZABBIX_API_TOKEN;
 
@@ -119,6 +140,22 @@ const dispatcher = new Agent({
     timeout: CONNECT_TIMEOUT_MS,
   },
 });
+
+export function getZabbixBaseUrl(): string | null {
+  const source = UI_URL ?? API_URL;
+  if (!source) return null;
+  try {
+    const url = new URL(source);
+    url.pathname = url.pathname.replace(/\/api_jsonrpc\.php$/i, "");
+    url.search = "";
+    url.hash = "";
+    const normalized = url.toString().replace(/\/$/, "");
+    return normalized || null;
+  } catch {
+    if (!UI_URL) return null;
+    return UI_URL.replace(/\/$/, "");
+  }
+}
 
 async function callZabbix<T>(
   method: string,
@@ -207,12 +244,8 @@ export async function fetchHosts(
     selectInventory: ["type", "type_full", "hardware", "os", "alias"],
     selectTags: ["tag", "value"],
     selectGroups: ["groupid", "name"],
-    selectInterfaces: ["ip"],
+    selectInterfaces: ["ip", "dns", "port"],
     groupids: groupIds,
-    templated_hosts: 0,
-    filter: {
-      status: ["0", "1"],
-    },
     limit: Number(process.env.ZABBIX_HOST_LIMIT ?? 10000),
   });
 }
@@ -257,6 +290,16 @@ export async function fetchHostsMonitoredByProxy(
   return { proxy, hosts };
 }
 
+export async function fetchProxiesByIds(
+  proxyIds: string[]
+): Promise<ZabbixProxy[]> {
+  if (!proxyIds.length) return [];
+  return callZabbix<ZabbixProxy[]>("proxy.get", {
+    output: ["proxyid", "host", "status"],
+    proxyids: proxyIds,
+  });
+}
+
 export async function fetchHostsByIds(hostIds: string[]): Promise<ZabbixHost[]> {
   if (!hostIds.length) {
     return [];
@@ -276,10 +319,6 @@ export async function fetchHostsByIds(hostIds: string[]): Promise<ZabbixHost[]> 
         selectGroups: ["groupid", "name"],
         selectInterfaces: ["ip"],
         hostids: batch,
-        templated_hosts: 0,
-        filter: {
-          status: ["0", "1"],
-        },
       })
     )
   );
@@ -305,6 +344,7 @@ export async function fetchProblemsByIds(
         output: [
           "eventid",
           "r_eventid",
+          "objectid",
           "clock",
           "ns",
           "name",
@@ -358,6 +398,7 @@ export async function fetchProblems(params: {
       output: [
         "eventid",
         "r_eventid",
+        "objectid",
         "clock",
         "ns",
         "name",
@@ -463,6 +504,29 @@ export async function fetchResolvedEventsInRange(params: {
     value: 0,
     limit: Number(process.env.ZABBIX_RESOLVED_EVENT_LIMIT ?? 5000),
   });
+}
+
+export async function fetchTriggersByIds(
+  triggerIds: string[]
+): Promise<ZabbixTrigger[]> {
+  if (!triggerIds.length) return [];
+
+  const batches: string[][] = [];
+  for (let i = 0; i < triggerIds.length; i += 100) {
+    batches.push(triggerIds.slice(i, i + 100));
+  }
+
+  const results = await Promise.all(
+    batches.map((batch) =>
+      callZabbix<ZabbixTrigger[]>("trigger.get", {
+        output: ["triggerid", "description", "comments"],
+        selectItems: ["itemid", "key_", "name"],
+        triggerids: batch,
+      })
+    )
+  );
+
+  return results.flat();
 }
 
 function parseNumber(value: string | undefined, fallback: number): number {

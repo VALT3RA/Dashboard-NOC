@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildDashboardMetrics } from "@/lib/metrics";
+import { getZabbixBaseUrl } from "@/lib/zabbix";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -42,13 +43,19 @@ export async function GET(request: Request) {
   try {
     const metrics = await buildDashboardMetrics(
       { month: selectedMonth, groupIds: parsedGroupIds },
-      { includeGroupStats: true }
+      {
+        includeGroupStats: true,
+        includeAlertDetails: true,
+        includeAvailabilityInsights: true,
+      }
     );
+    const zabbixBaseUrl = getZabbixBaseUrl();
 
     return NextResponse.json({
       meta: {
         period: metrics.meta.period,
         generatedAt: metrics.meta.generatedAt,
+        ...(zabbixBaseUrl ? { zabbixBaseUrl } : {}),
       },
       kpis: metrics.kpis,
       availability: metrics.availability,

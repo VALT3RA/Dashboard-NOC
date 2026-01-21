@@ -47,6 +47,21 @@ const PROBLEM_LOOKBACK_SECONDS = Math.max(
   0,
   PROBLEM_LOOKBACK_DAYS * 24 * 60 * 60
 );
+const DEFAULT_REACHABILITY_ALERT_TYPES = [
+  "ICMP",
+  "Zabbix agent",
+  "Uptime",
+  "SNMP",
+];
+const REACHABILITY_ALERT_TYPES = new Set(
+  (
+    process.env.DASHBOARD_REACHABILITY_ALERT_TYPES ??
+    DEFAULT_REACHABILITY_ALERT_TYPES.join(",")
+  )
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+);
 
 type HostCategory = {
   id: string;
@@ -119,6 +134,10 @@ function safeAverage(values: number[], fallback = 0): number {
 function secondsToMinutes(value: number): number {
   if (!value || Number.isNaN(value)) return 0;
   return value / 60;
+}
+
+function isReachabilityAlertType(alertType: string): boolean {
+  return REACHABILITY_ALERT_TYPES.has(alertType.toLowerCase());
 }
 
 function sumDowntimeForHosts(
@@ -311,11 +330,18 @@ export async function buildDashboardMetrics(
       .filter((id): id is string => Boolean(id && id !== "0"))
   );
 
+  const triggerTypeMap = await buildTriggerTypeMapFromProblems(problems);
+
   let hostDowntime = new Map<
     string,
     { total: number; business: number; off: number }
   >();
+  let reachabilityHostDowntime = new Map<
+    string,
+    { total: number; business: number; off: number }
+  >();
   const hostIntervals = new Map<string, Interval[]>();
+  const reachabilityIntervals = new Map<string, Interval[]>();
   const hostDurationSamples = new Map<
     string,
     { detection: number[]; response: number[]; resolution: number[] }
@@ -324,6 +350,15 @@ export async function buildDashboardMetrics(
   const hostOpenCount = new Map<string, number>();
   const hostNameMap = new Map<string, string>();
   const hostGroupMap = new Map<string, ZabbixHostGroup[]>();
+  const isReachabilityProblem = (problem: ZabbixProblem) => {
+    const triggerId =
+      problem.objectid && problem.objectid !== "0"
+        ? String(problem.objectid)
+        : null;
+    const triggerInfo = triggerId ? triggerTypeMap.get(triggerId) : null;
+    const info = triggerInfo ?? deriveAlertType([], problem.name);
+    return isReachabilityAlertType(info.alertType);
+  };
 
   function isActive(host: ZabbixHost) {
     // status: 0=monitored/active, 1=disabled
@@ -382,6 +417,10 @@ export async function buildDashboardMetrics(
 
   for (const problem of problems) {
     const rawClock = Number(problem.clock);
+    const triggerId =
+      problem.objectid && problem.objectid !== "0"
+        ? String(problem.objectid)
+        : undefined;
     const startsInsideRange =
       Number.isFinite(rawClock) &&
       rawClock >= startSeconds &&
@@ -415,6 +454,7 @@ export async function buildDashboardMetrics(
     );
     const durationSeconds = Math.max(0, problemEnd - problemStart);
     const hasOverlap = durationSeconds > 0;
+    const reachabilityProblem = hasOverlap && isReachabilityProblem(problem);
 
     const acknowledges = [...(problem.acknowledges ?? [])].sort((a, b) => {
       return Number(a.clock) - Number(b.clock);
@@ -481,7 +521,6 @@ export async function buildDashboardMetrics(
     const openedAt = Number.isFinite(rawClock)
       ? new Date(rawClock * 1000).toISOString()
       : new Date(problemStart * 1000).toISOString();
-    const triggerId = problem.objectid ? String(problem.objectid) : undefined;
     const firstAckAt =
       firstAckSeconds !== null
         ? new Date(firstAckSeconds * 1000).toISOString()
@@ -512,6 +551,11 @@ export async function buildDashboardMetrics(
         const intervals = hostIntervals.get(host.hostid) ?? [];
         intervals.push({ start: problemStart, end: problemEnd });
         hostIntervals.set(host.hostid, intervals);
+      }
+      if (reachabilityProblem) {
+        const intervals = reachabilityIntervals.get(host.hostid) ?? [];
+        intervals.push({ start: problemStart, end: problemEnd });
+        reachabilityIntervals.set(host.hostid, intervals);
       }
 
       const durationSample = hostDurationSamples.get(host.hostid) ?? {
@@ -655,11 +699,14 @@ export async function buildDashboardMetrics(
   }
 
   hostDowntime = buildHostDowntime(hostIntervals);
+  reachabilityHostDowntime = buildHostDowntime(reachabilityIntervals);
 
   if (groupAccumulators) {
     for (const acc of groupAccumulators.values()) {
       acc.downtimeTotal = 0;
       acc.downtimeBusiness = 0;
+      acc.reachabilityDowntimeTotal = 0;
+      acc.reachabilityDowntimeBusiness = 0;
       acc.hostDowntime = new Map<string, HostImpactAccumulator>();
       for (const hostId of acc.activeHostIds) {
         const downtime = hostDowntime.get(hostId) ?? {
@@ -667,8 +714,15 @@ export async function buildDashboardMetrics(
           business: 0,
           off: 0,
         };
+        const reachability = reachabilityHostDowntime.get(hostId) ?? {
+          total: 0,
+          business: 0,
+          off: 0,
+        };
         acc.downtimeTotal += downtime.total;
         acc.downtimeBusiness += downtime.business;
+        acc.reachabilityDowntimeTotal += reachability.total;
+        acc.reachabilityDowntimeBusiness += reachability.business;
         acc.hostDowntime.set(hostId, {
           hostid: hostId,
           name: hostNameMap.get(hostId) ?? hostId,
@@ -680,8 +734,8 @@ export async function buildDashboardMetrics(
     }
   }
 
-  const triggerTypeMap = includeAvailabilityInsights
-    ? await buildTriggerTypeMapFromProblems(problems)
+  const triggerTypeMapForInsights = includeAvailabilityInsights
+    ? triggerTypeMap
     : new Map<string, TriggerTypeInfo>();
 
   const totalProblems = problems.length;
@@ -699,6 +753,11 @@ export async function buildDashboardMetrics(
     activeHostIds,
     "total"
   );
+  const reachabilityDowntimeSeconds = sumDowntimeForHosts(
+    reachabilityHostDowntime,
+    activeHostIds,
+    "total"
+  );
   const rangeShiftSplit = splitSecondsByShift(startSeconds, endSeconds);
   const totalBusinessSeconds = rangeShiftSplit.business;
   const totalOffSeconds = rangeShiftSplit.off;
@@ -709,9 +768,19 @@ export async function buildDashboardMetrics(
     activeHostIds,
     "business"
   );
+  const reachabilityBusinessDowntime = sumDowntimeForHosts(
+    reachabilityHostDowntime,
+    activeHostIds,
+    "business"
+  );
 
   const offDowntime = sumDowntimeForHosts(
     hostDowntime,
+    activeHostIds,
+    "off"
+  );
+  const reachabilityOffDowntime = sumDowntimeForHosts(
+    reachabilityHostDowntime,
     activeHostIds,
     "off"
   );
@@ -739,6 +808,27 @@ export async function buildDashboardMetrics(
         100
       : 100;
 
+  const reachabilityAvailability =
+    totalHostSeconds > 0
+      ? ((totalHostSeconds - reachabilityDowntimeSeconds) /
+          totalHostSeconds) *
+        100
+      : 100;
+
+  const reachabilityBusinessAvailability =
+    totalBusinessSeconds > 0
+      ? ((totalBusinessSeconds * hostFactor - reachabilityBusinessDowntime) /
+          (totalBusinessSeconds * hostFactor)) *
+        100
+      : 100;
+
+  const reachabilityOffHoursAvailability =
+    totalOffSeconds > 0
+      ? ((totalOffSeconds * hostFactor - reachabilityOffDowntime) /
+          (totalOffSeconds * hostFactor)) *
+        100
+      : 100;
+
   const categories = buildHostCategoryStats({
     hosts: activeHostList,
     hostDowntime,
@@ -747,6 +837,7 @@ export async function buildDashboardMetrics(
   const hostMetrics = buildHostMetrics({
     hostNameMap,
     hostDowntime,
+    reachabilityHostDowntime,
     hostDurationSamples,
     hostEventCount,
     hostOpenCount,
@@ -777,7 +868,7 @@ export async function buildDashboardMetrics(
         businessSeconds: totalBusinessSeconds,
         includeAlertDetails,
         includeAvailabilityInsights,
-        triggerTypeMap,
+        triggerTypeMap: triggerTypeMapForInsights,
         businessWindowLabel,
       })
     : undefined;
@@ -794,11 +885,17 @@ export async function buildDashboardMetrics(
       responseMinutes,
       resolutionMinutes,
       availabilityPct: overallAvailability,
+      reachabilityPct: reachabilityAvailability,
     },
     availability: {
       businessPct: businessAvailability,
       offHoursPct: offHoursAvailability,
       overallPct: overallAvailability,
+    },
+    reachability: {
+      businessPct: reachabilityBusinessAvailability,
+      offHoursPct: reachabilityOffHoursAvailability,
+      overallPct: reachabilityAvailability,
     },
     hostCategories: categories,
     severitySummary,
@@ -837,6 +934,7 @@ function percentage(value: number, total: number): number {
 function buildHostMetrics({
   hostNameMap,
   hostDowntime,
+  reachabilityHostDowntime,
   hostDurationSamples,
   hostEventCount,
   hostOpenCount,
@@ -845,6 +943,10 @@ function buildHostMetrics({
 }: {
   hostNameMap: Map<string, string>;
   hostDowntime: Map<
+    string,
+    { total: number; business: number; off: number }
+  >;
+  reachabilityHostDowntime: Map<
     string,
     { total: number; business: number; off: number }
   >;
@@ -860,6 +962,7 @@ function buildHostMetrics({
   return Array.from(hostNameMap.entries())
     .map(([hostid, name]) => {
       const downtime = hostDowntime.get(hostid);
+      const reachability = reachabilityHostDowntime.get(hostid);
       const durations = hostDurationSamples.get(hostid);
       const detectionMinutes = secondsToMinutes(
         safeAverage(durations?.detection ?? [])
@@ -881,6 +984,18 @@ function buildHostMetrics({
           ? ((businessSeconds - (downtime?.business ?? 0)) / businessSeconds) *
             100
           : 100;
+      const reachabilityPct =
+        totalRangeSeconds > 0
+          ? ((totalRangeSeconds - (reachability?.total ?? 0)) /
+              totalRangeSeconds) *
+            100
+          : 100;
+      const businessReachabilityPct =
+        businessSeconds > 0
+          ? ((businessSeconds - (reachability?.business ?? 0)) /
+              businessSeconds) *
+            100
+          : 100;
 
       return {
         hostid,
@@ -890,6 +1005,8 @@ function buildHostMetrics({
         resolutionMinutes,
         availabilityPct,
         businessAvailabilityPct,
+        reachabilityPct,
+        businessReachabilityPct,
         eventCount: hostEventCount.get(hostid) ?? 0,
         openEventCount: hostOpenCount.get(hostid) ?? 0,
       };
@@ -910,6 +1027,8 @@ type GroupAccumulator = {
   resolution: number[];
   downtimeTotal: number;
   downtimeBusiness: number;
+  reachabilityDowntimeTotal: number;
+  reachabilityDowntimeBusiness: number;
   hostDowntime: Map<string, HostImpactAccumulator>;
   eventCount: number;
   openCount: number;
@@ -961,6 +1080,8 @@ function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
     resolution: [],
     downtimeTotal: 0,
     downtimeBusiness: 0,
+    reachabilityDowntimeTotal: 0,
+    reachabilityDowntimeBusiness: 0,
     hostDowntime: new Map<string, HostImpactAccumulator>(),
     eventCount: 0,
     openCount: 0,
@@ -1007,6 +1128,18 @@ function buildGroupSummaries({
               totalBusinessSeconds) *
             100
           : 100;
+      const reachabilityPct =
+        totalHostSeconds > 0
+          ? ((totalHostSeconds - acc.reachabilityDowntimeTotal) /
+              totalHostSeconds) *
+            100
+          : 100;
+      const businessReachabilityPct =
+        totalBusinessSeconds > 0
+          ? ((totalBusinessSeconds - acc.reachabilityDowntimeBusiness) /
+              totalBusinessSeconds) *
+            100
+          : 100;
       const availabilityInsights = includeAvailabilityInsights
         ? buildAvailabilityInsights(
             acc,
@@ -1045,6 +1178,8 @@ function buildGroupSummaries({
         resolutionMinutes: secondsToMinutes(safeAverage(acc.resolution)),
         availabilityPct,
         businessAvailabilityPct,
+        reachabilityPct,
+        businessReachabilityPct,
         ...(includeAlertDetails ? { alertDetails: acc.alertDetails } : {}),
         ...(availabilityInsights ? { availabilityInsights } : {}),
       };

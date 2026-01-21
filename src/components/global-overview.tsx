@@ -43,8 +43,10 @@ const SORT_FIELDS: Array<{ label: string; value: GroupSortField }> = [
   { label: "Alertas em aberto", value: "openAlerts" },
   { label: "Tempo de resposta (1o ACK)", value: "detection" },
   { label: "Resolucao", value: "resolution" },
-  { label: "Disponibilidade", value: "availability" },
-  { label: "Disponibilidade (7h-23:59)", value: "availabilityBusiness" },
+  { label: "Disponibilidade (alertas)", value: "availability" },
+  { label: "Disponibilidade (alertas 7h-23:59)", value: "availabilityBusiness" },
+  { label: "Disponibilidade host", value: "reachability" },
+  { label: "Disponibilidade host (7h-23:59)", value: "reachabilityBusiness" },
 ];
 const HOST_SORT_FIELDS: Array<{ label: string; value: HostSortField }> = [
   { label: "Nome", value: "name" },
@@ -52,8 +54,10 @@ const HOST_SORT_FIELDS: Array<{ label: string; value: HostSortField }> = [
   { label: "Alertas em aberto", value: "openAlerts" },
   { label: "Tempo de resposta (1o ACK)", value: "detection" },
   { label: "Resolucao", value: "resolution" },
-  { label: "Disponibilidade", value: "availability" },
-  { label: "Disponibilidade (7h-23:59)", value: "availabilityBusiness" },
+  { label: "Disponibilidade (alertas)", value: "availability" },
+  { label: "Disponibilidade (alertas 7h-23:59)", value: "availabilityBusiness" },
+  { label: "Disponibilidade host", value: "reachability" },
+  { label: "Disponibilidade host (7h-23:59)", value: "reachabilityBusiness" },
 ];
 
 type OverviewCardSource = {
@@ -66,6 +70,8 @@ type OverviewCardSource = {
   resolution: number;
   availability: number;
   businessAvailability: number;
+  reachability: number;
+  businessReachability: number;
   contractedHosts: number | null;
 };
 
@@ -79,6 +85,8 @@ const EMPTY_SOURCE: OverviewCardSource = {
   resolution: 0,
   availability: 0,
   businessAvailability: 0,
+  reachability: 0,
+  businessReachability: 0,
   contractedHosts: null,
 };
 
@@ -913,20 +921,42 @@ const CARD_DEFINITIONS: CardDefinition[] = [
   {
     id: "availability",
     section: "service",
-    title: "Disponibilidade geral",
+    title: "Disponibilidade (alertas)",
     unit: "percent",
     target: 99.5,
     warnMargin: 0.3,
     betterDirection: "higher",
+    description: "Todos os alertas contam para indisponibilidade",
   },
   {
     id: "businessAvailability",
     section: "service",
-    title: "Disponibilidade (7h–23:59)",
+    title: "Disponibilidade (alertas 7h-23:59)",
     unit: "percent",
     target: 99.0,
     warnMargin: 0.5,
     betterDirection: "higher",
+    description: "Somente janela comercial",
+  },
+  {
+    id: "reachability",
+    section: "service",
+    title: "Disponibilidade host",
+    unit: "percent",
+    target: 99.5,
+    warnMargin: 0.3,
+    betterDirection: "higher",
+    description: "Alertas de ICMP/agent/uptime/SNMP",
+  },
+  {
+    id: "businessReachability",
+    section: "service",
+    title: "Disponibilidade host (7h-23:59)",
+    unit: "percent",
+    target: 99.0,
+    warnMargin: 0.5,
+    betterDirection: "higher",
+    description: "Somente janela comercial",
   },
   {
     id: "hosts",
@@ -1544,7 +1574,7 @@ function GroupTable({
           className="flex items-center gap-2 font-semibold text-slate-700"
         >
           <Filter className="h-4 w-4" aria-hidden />
-          Disponibilidade (7h–23:59) — meta {BUSINESS_AVAILABILITY_TARGET.toFixed(1)}%
+          Disponibilidade (alertas 7h-23:59) - meta {BUSINESS_AVAILABILITY_TARGET.toFixed(1)}%
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -1662,7 +1692,7 @@ function GroupTable({
                 dividerClass={COLUMN_DIVIDER_CLASS}
                 exporting={exporting}
               >
-                Disponibilidade (%)
+                Disponibilidade (alertas)
               </HeaderCell>
               <HeaderCell
                 align="center"
@@ -1670,7 +1700,23 @@ function GroupTable({
                 dividerClass={COLUMN_DIVIDER_CLASS}
                 exporting={exporting}
               >
-                Disponibilidade (7h-23:59)
+                Disponibilidade (alertas 7h-23:59)
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Gauge className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Disponibilidade host
+              </HeaderCell>
+              <HeaderCell
+                align="center"
+                icon={<Gauge className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                Disponibilidade host (7h-23:59)
               </HeaderCell>
             </tr>
           </thead>
@@ -1680,7 +1726,7 @@ function GroupTable({
             {loading && (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={11}
                   className={`px-4 py-6 text-center ${exporting ? "text-white/80" : "text-slate-500"}`}
                 >
                   Carregando métricas...
@@ -1690,7 +1736,7 @@ function GroupTable({
             {!loading && processedRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={11}
                   className={`px-4 py-6 text-center ${exporting ? "text-white/80" : "text-slate-500"}`}
                 >
                   {hasFilterApplied
@@ -1777,6 +1823,26 @@ function GroupTable({
                       label="Comercial"
                       exporting={exporting}
                       onDetailsClick={() => handleAvailabilityDetails(group)}
+                    />
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right ${COLUMN_DIVIDER_CLASS}`}
+                  >
+                    <AvailabilityCell
+                      value={group.reachabilityPct}
+                      target={AVAILABILITY_TARGET}
+                      label="Geral"
+                      exporting={exporting}
+                    />
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right ${COLUMN_DIVIDER_CLASS}`}
+                  >
+                    <AvailabilityCell
+                      value={group.businessReachabilityPct}
+                      target={BUSINESS_AVAILABILITY_TARGET}
+                      label="Comercial"
+                      exporting={exporting}
                     />
                   </td>
                 </tr>
@@ -1949,7 +2015,7 @@ function AvailabilityInsightsModal({
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
-              Disponibilidade (7h-23:59)
+              Disponibilidade (alertas 7h-23:59)
             </p>
             <h3 className="text-lg font-semibold text-slate-900">
               Detalhamento - {groupLabel || "Host group"}
@@ -2479,24 +2545,30 @@ function HostTable({
               Resolução (min)
             </th>
             <th className="px-4 py-3 text-right font-semibold">
-              Disponibilidade (%)
+              Disponibilidade (alertas)
             </th>
             <th className="px-4 py-3 text-right font-semibold">
-              Disponibilidade (7h-23:59)
+              Disponibilidade (alertas 7h-23:59)
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Disponibilidade host
+            </th>
+            <th className="px-4 py-3 text-right font-semibold">
+              Disponibilidade host (7h-23:59)
             </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white text-slate-800">
           {loading && (
             <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
+              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
                 Carregando métricas...
               </td>
             </tr>
           )}
           {!loading && rows.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-slate-500">
+              <td colSpan={9} className="px-4 py-6 text-center text-slate-500">
                 Nenhum host encontrado.
               </td>
             </tr>
@@ -2530,6 +2602,24 @@ function HostTable({
                   }`}
                 >
                   {host.businessAvailabilityPct.toFixed(2)}%
+                </td>
+                <td
+                  className={`px-4 py-3 text-right ${
+                    host.reachabilityPct < 99
+                      ? "text-rose-600"
+                      : "text-emerald-600"
+                  }`}
+                >
+                  {host.reachabilityPct.toFixed(2)}%
+                </td>
+                <td
+                  className={`px-4 py-3 text-right ${
+                    host.businessReachabilityPct < 99
+                      ? "text-rose-600"
+                      : "text-emerald-600"
+                  }`}
+                >
+                  {host.businessReachabilityPct.toFixed(2)}%
                 </td>
               </tr>
             ))}
@@ -2654,6 +2744,23 @@ function summarizeHostGroupMetrics(
           0
         ) / availabilityWeight
       : 0;
+  const reachability =
+    availabilityWeight > 0
+      ? groups.reduce(
+          (acc, group) =>
+            acc + (group.reachabilityPct || 0) * (group.hosts || 0),
+          0
+        ) / availabilityWeight
+      : 0;
+  const businessReachability =
+    availabilityWeight > 0
+      ? groups.reduce(
+          (acc, group) =>
+            acc +
+            (group.businessReachabilityPct || 0) * (group.hosts || 0),
+          0
+        ) / availabilityWeight
+      : 0;
 
   return {
     alerts: sumAlerts,
@@ -2666,6 +2773,8 @@ function summarizeHostGroupMetrics(
     resolution,
     availability,
     businessAvailability,
+    reachability,
+    businessReachability,
     contractedHosts: null,
   };
 }
@@ -2740,6 +2849,8 @@ function convertSummaryToSource(
     resolution: summary.resolution,
     availability: summary.availability,
     businessAvailability: summary.businessAvailability,
+    reachability: summary.reachability,
+    businessReachability: summary.businessReachability,
     contractedHosts: summary.contractedHosts ?? null,
   };
 }
@@ -2758,6 +2869,8 @@ function convertTotalsToSource(
     resolution: data.kpis.resolutionMinutes ?? 0,
     availability: data.kpis.availabilityPct ?? 0,
     businessAvailability: data.availability.businessPct ?? 0,
+    reachability: data.reachability.overallPct ?? 0,
+    businessReachability: data.reachability.businessPct ?? 0,
     contractedHosts: null,
   };
 }
@@ -2776,6 +2889,8 @@ function convertSingleToSource(
     resolution: data.kpis.resolutionMinutes ?? 0,
     availability: data.kpis.availabilityPct ?? 0,
     businessAvailability: data.availability.businessPct ?? 0,
+    reachability: data.reachability.overallPct ?? 0,
+    businessReachability: data.reachability.businessPct ?? 0,
     contractedHosts: null,
   };
 }
@@ -3267,7 +3382,9 @@ type GroupSortField =
   | "detection"
   | "resolution"
   | "availability"
-  | "availabilityBusiness";
+  | "availabilityBusiness"
+  | "reachability"
+  | "reachabilityBusiness";
 type HostSortField = GroupSortField;
 
 function compareGroupMetrics(
@@ -3294,6 +3411,13 @@ function compareGroupMetrics(
       return (
         multiplier *
         (a.businessAvailabilityPct - b.businessAvailabilityPct)
+      );
+    case "reachability":
+      return multiplier * (a.reachabilityPct - b.reachabilityPct);
+    case "reachabilityBusiness":
+      return (
+        multiplier *
+        (a.businessReachabilityPct - b.businessReachabilityPct)
       );
     default:
       return 0;
@@ -3324,6 +3448,13 @@ function compareHostMetrics(
       return (
         multiplier *
         (a.businessAvailabilityPct - b.businessAvailabilityPct)
+      );
+    case "reachability":
+      return multiplier * (a.reachabilityPct - b.reachabilityPct);
+    case "reachabilityBusiness":
+      return (
+        multiplier *
+        (a.businessReachabilityPct - b.businessReachabilityPct)
       );
     default:
       return 0;

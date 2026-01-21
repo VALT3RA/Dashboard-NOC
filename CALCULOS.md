@@ -24,6 +24,7 @@ Para cada evento:
    Availability = 100 * ((N_hosts * segundos do periodo) - downtime total) / (N_hosts * segundos do periodo)
 3. **Disponibilidade por horario**: aplicamos a mesma formula usando apenas as fatias de tempo comercial (7h–23:59) e fora do expediente. A soma das fatias e calculada pela funcao `splitSecondsByShift`.
 4. **Disponibilidade por host**: pegamos o downtime individual (`hostDowntime[hostid]`) e aplicamos as duas equacoes: uma para o periodo completo (campos `availabilityPct`), outra so para o horario comercial (`businessAvailabilityPct`).
+5. **Disponibilidade de host (reachability)**: repetimos o calculo usando apenas alertas considerados de indisponibilidade real (tipos ICMP, Zabbix agent, Uptime, SNMP). A lista pode ser ajustada via `DASHBOARD_REACHABILITY_ALERT_TYPES` (CSV).
 
 ### 4. Contagem de Alertas
 - **Alertas (periodo)**: quantidade total de eventos retornados para o mes/host group.
@@ -38,6 +39,7 @@ Para cada host listado:
 - `responseMinutes`: media do delta do primeiro ACK em relacao ao inicio do problema.
 - `resolutionMinutes`: media do tempo ate a resolucao (r_eventid ou fim do mes).
 - `availabilityPct` e `businessAvailabilityPct`: formulas descritas na secao 3 aplicadas ao downtime do host (total e janela comercial).
+- `reachabilityPct` e `businessReachabilityPct`: mesmas formulas, mas usando apenas alertas de indisponibilidade real.
 
 ### 6. Regras de Fallback
 - **Sem ACK**: o tempo de resposta fica vazio; ainda assim, o evento conta para alertas e disponibilidade.
@@ -47,6 +49,7 @@ Para cada host listado:
 ### 7. Variaveis de Ambiente relevantes
 - `ZABBIX_API_URL` / `ZABBIX_API_TOKEN`: conexao com o Zabbix.
 - `DASHBOARD_TIMEZONE`, `DASHBOARD_BUSINESS_START_HOUR`, `DASHBOARD_BUSINESS_END_HOUR`, `DASHBOARD_SHIFT_STEP_MINUTES`: impactam o fatiamento de disponibilidade.
+- `DASHBOARD_REACHABILITY_ALERT_TYPES`: lista CSV dos tipos de alerta usados para disponibilidade de host (padrao: ICMP, Zabbix agent, Uptime, SNMP).
 - `ZABBIX_PROBLEM_LIMIT`: limite maximo de eventos buscados (padrao 5000). Ajuste se o grupo gerar mais eventos mensais.
 
 ### 8. Referencias de Codigo

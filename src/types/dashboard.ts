@@ -21,6 +21,8 @@ export type HostMetric = {
   resolutionMinutes: number;
   availabilityPct: number;
   businessAvailabilityPct: number;
+  reachabilityPct: number;
+  businessReachabilityPct: number;
 };
 
 export type AvailabilityHostImpact = {
@@ -111,6 +113,8 @@ export type HostGroupMetric = {
   resolutionMinutes: number;
   availabilityPct: number;
   businessAvailabilityPct: number;
+  reachabilityPct: number;
+  businessReachabilityPct: number;
   availabilityInsights?: AvailabilityInsights;
 };
 
@@ -120,8 +124,14 @@ export type DashboardMetrics = {
     responseMinutes: number;
     resolutionMinutes: number;
     availabilityPct: number;
+    reachabilityPct: number;
   };
   availability: {
+    businessPct: number;
+    offHoursPct: number;
+    overallPct: number;
+  };
+  reachability: {
     businessPct: number;
     offHoursPct: number;
     overallPct: number;
@@ -170,6 +180,7 @@ export type GroupMetricsApiResponse = {
   };
   kpis: DashboardMetrics["kpis"];
   availability: DashboardMetrics["availability"];
+  reachability: DashboardMetrics["reachability"];
   totals: DashboardMetrics["groupTotals"];
   groups: HostGroupMetric[];
   severitySummary: SeveritySummary[];

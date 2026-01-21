@@ -59,6 +59,7 @@ export async function GET(request: Request) {
       },
       kpis: metrics.kpis,
       availability: metrics.availability,
+      reachability: metrics.reachability,
       totals: metrics.groupTotals,
       groups: metrics.groupSummaries ?? [],
       severitySummary: metrics.severitySummary,

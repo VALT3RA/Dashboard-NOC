@@ -762,6 +762,7 @@ export function GlobalOverview() {
           loading={loading}
           zabbixBaseUrl={zabbixBaseUrl}
           month={month}
+          selectedGroupIds={selectedGroups}
         />
       )}
 
@@ -1492,11 +1493,13 @@ function GroupTable({
   loading,
   zabbixBaseUrl,
   month,
+  selectedGroupIds,
 }: {
   rows: HostGroupMetric[];
   loading: boolean;
   zabbixBaseUrl: string | null;
   month: string;
+  selectedGroupIds: string[];
 }) {
   const AVAILABILITY_TARGET = 99.5;
   const BUSINESS_AVAILABILITY_TARGET = 99.0;
@@ -1622,6 +1625,14 @@ function GroupTable({
   const headerBgClass = "bg-slate-50/80";
   const theadBgClass = exporting ? "bg-white/10" : "bg-slate-900";
   const tbodyBgClass = exporting ? "bg-transparent" : "bg-white";
+  const allHostsSearch = new URLSearchParams();
+  allHostsSearch.set("scope", "all");
+  allHostsSearch.set("month", month);
+  allHostsSearch.set("window", "overall");
+  if (selectedGroupIds.length) {
+    allHostsSearch.set("groupIds", selectedGroupIds.join(","));
+  }
+  const allHostsHref = `/reports/reachability-alerts?${allHostsSearch.toString()}`;
 
   return (
     <div className={`rounded-2xl border ${CONTAINER_BORDER_CLASS}`}>
@@ -1786,7 +1797,17 @@ function GroupTable({
                 dividerClass={COLUMN_DIVIDER_CLASS}
                 exporting={exporting}
               >
-                Disponibilidade host
+                <span className="flex flex-col items-center gap-1">
+                  <span>Disponibilidade host</span>
+                  {!exporting && (
+                    <Link
+                      href={allHostsHref}
+                      className="text-[11px] font-semibold text-blue-200 transition hover:text-white"
+                    >
+                      Ver todos os hosts
+                    </Link>
+                  )}
+                </span>
               </HeaderCell>
               <HeaderCell
                 align="center"

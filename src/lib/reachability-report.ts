@@ -5,6 +5,7 @@ import { formatInTimeZone } from "date-fns-tz";
 import { ptBR } from "date-fns/locale";
 import {
   fetchHostGroups,
+  fetchHostsByIds,
   fetchProblems,
   fetchRecoveryEvents,
   fetchTriggersByIds,
@@ -50,6 +51,7 @@ const severityLabelMap = new Map(
 );
 
 export type ReachabilityWindow = "business" | "overall";
+export type ReachabilityScope = "group" | "all";
 
 export type ReachabilityAlertRecord = {
   eventId: string;
@@ -60,6 +62,8 @@ export type ReachabilityAlertRecord = {
   openedAt: string;
   closedAt: string | null;
   isOpen: boolean;
+  openedInBusinessWindow: boolean;
+  groupName?: string;
   alertType: string;
   itemKeys: string[];
   hostNames: string[];
@@ -69,6 +73,7 @@ export type ReachabilityAlertRecord = {
 };
 
 export type ReachabilityReport = {
+  scope: ReachabilityScope;
   groupId: string;
   groupLabel: string;
   monthLabel: string;
@@ -84,10 +89,13 @@ export type ReachabilityReport = {
 type TriggerTypeInfo = {
   alertType: string;
   itemKeys: string[];
+  isReachability: boolean;
 };
 
 export async function buildReachabilityReport(params: {
-  groupId: string;
+  groupId?: string;
+  groupIds?: string[];
+  scope?: ReachabilityScope;
   month: string;
   window: ReachabilityWindow;
   page: number;
@@ -95,15 +103,38 @@ export async function buildReachabilityReport(params: {
 }): Promise<ReachabilityReport> {
   const { groupId, month, window, page, pageSize } = params;
   const { startSeconds, endSeconds, label } = getRangeFromMonth(month);
+  const isAllScope = params.scope === "all" || groupId === "all";
+  const selectedGroupIds = (params.groupIds ?? [])
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const hasSelectedGroupIds = selectedGroupIds.length > 0;
+
+  if (!isAllScope && !groupId) {
+    throw new Error("Host group nao informado.");
+  }
 
   const groups = await fetchHostGroups();
-  const group = groups.find((entry) => entry.groupid === groupId);
-  if (!group) {
-    throw new Error(`Host group ${groupId} nao encontrado no Zabbix.`);
+  const relevantGroups = groups.filter((entry) =>
+    isRelevantGroupName(entry.name)
+  );
+  const selectedGroups = hasSelectedGroupIds
+    ? groups.filter((entry) => selectedGroupIds.includes(entry.groupid))
+    : [];
+  const allowedGroupNames = new Set(
+    hasSelectedGroupIds
+      ? selectedGroups.map((entry) => entry.name)
+      : relevantGroups.map((entry) => entry.name)
+  );
+  const resolvedGroup = !isAllScope
+    ? groups.find((entry) => entry.groupid === groupId)
+    : null;
+  if (!isAllScope && !resolvedGroup) {
+    throw new Error(`Host group ${groupId ?? ""} nao encontrado no Zabbix.`);
   }
 
   const problems = await fetchProblems({
-    groupId,
+    groupId: isAllScope ? undefined : groupId,
+    groupIds: isAllScope && hasSelectedGroupIds ? selectedGroupIds : undefined,
     timeFrom: startSeconds,
     timeTill: endSeconds,
   });
@@ -114,6 +145,9 @@ export async function buildReachabilityReport(params: {
   );
   const triggerTypeMap = await buildTriggerTypeMapFromProblems(problems);
 
+  const hostGroupNamesByHost = isAllScope
+    ? await buildHostGroupNameMap(problems, allowedGroupNames)
+    : new Map<string, string[]>();
   const alerts: ReachabilityAlertRecord[] = [];
 
   for (const problem of problems) {
@@ -127,7 +161,7 @@ export async function buildReachabilityReport(params: {
     const triggerInfo = triggerId ? triggerTypeMap.get(triggerId) : null;
     const fallback = deriveAlertType([], problem.name);
     const info = triggerInfo ?? fallback;
-    if (!isReachabilityAlertType(info.alertType)) {
+    if (!isReachabilityAlertType(info)) {
       continue;
     }
 
@@ -161,26 +195,39 @@ export async function buildReachabilityReport(params: {
           .filter(Boolean)
       )
     ).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    const groupNames = isAllScope
+      ? getGroupNamesForProblem(problem, hostGroupNamesByHost)
+      : [];
+    if (isAllScope && groupNames.length === 0) {
+      continue;
+    }
+    const targetGroupNames = isAllScope ? groupNames : [undefined];
 
-    alerts.push({
-      eventId: String(problem.eventid),
-      triggerId,
-      name: problem.name,
-      severity,
-      severityLabel,
-      openedAt: new Date(problemStart * 1000).toISOString(),
-      closedAt:
-        resolvedSeconds !== null
-          ? new Date(resolvedSeconds * 1000).toISOString()
-          : null,
-      isOpen: !problem.r_eventid || problem.r_eventid === "0",
-      alertType: info.alertType,
-      itemKeys: [...info.itemKeys].sort((a, b) => a.localeCompare(b)),
-      hostNames,
-      windowMinutes: secondsToMinutes(windowSeconds),
-      totalMinutes: secondsToMinutes(totalSeconds),
-      businessMinutes: secondsToMinutes(businessSeconds),
-    });
+    for (const groupName of targetGroupNames) {
+      alerts.push({
+        eventId: String(problem.eventid),
+        triggerId,
+        name: problem.name,
+        severity,
+        severityLabel,
+        openedAt: new Date(problemStart * 1000).toISOString(),
+        closedAt:
+          resolvedSeconds !== null
+            ? new Date(resolvedSeconds * 1000).toISOString()
+            : null,
+        isOpen: !problem.r_eventid || problem.r_eventid === "0",
+        openedInBusinessWindow: isWithinBusinessWindow(
+          new Date(problemStart * 1000)
+        ),
+        groupName,
+        alertType: info.alertType,
+        itemKeys: [...info.itemKeys].sort((a, b) => a.localeCompare(b)),
+        hostNames,
+        windowMinutes: secondsToMinutes(windowSeconds),
+        totalMinutes: secondsToMinutes(totalSeconds),
+        businessMinutes: secondsToMinutes(businessSeconds),
+      });
+    }
   }
 
   alerts.sort((a, b) => {
@@ -197,10 +244,17 @@ export async function buildReachabilityReport(params: {
   const safePage = Math.min(Math.max(1, page), pages);
   const startIndex = (safePage - 1) * safePageSize;
   const pageItems = alerts.slice(startIndex, startIndex + safePageSize);
+  const selectionLabel = isAllScope && hasSelectedGroupIds
+    ? formatGroupSelectionLabel(selectedGroups, selectedGroupIds.length)
+    : null;
 
   return {
-    groupId: group.groupid,
-    groupLabel: group.name,
+    scope: isAllScope ? "all" : "group",
+    groupId: resolvedGroup?.groupid ?? "all",
+    groupLabel:
+      resolvedGroup?.name ??
+      selectionLabel ??
+      "Todos os host groups",
     monthLabel: label,
     window,
     windowLabel:
@@ -213,8 +267,11 @@ export async function buildReachabilityReport(params: {
   };
 }
 
-function isReachabilityAlertType(alertType: string): boolean {
-  return REACHABILITY_ALERT_TYPES.has(alertType.toLowerCase());
+function isReachabilityAlertType(info: TriggerTypeInfo): boolean {
+  return (
+    info.isReachability &&
+    REACHABILITY_ALERT_TYPES.has(info.alertType.toLowerCase())
+  );
 }
 
 function secondsToMinutes(value: number): number {
@@ -292,6 +349,82 @@ function getMinutesOfDay(date: Date) {
   return hours * 60 + minutes;
 }
 
+function isWithinBusinessWindow(date: Date): boolean {
+  const minutesOfDay = getMinutesOfDay(date);
+  return (
+    minutesOfDay >= BUSINESS_START_MINUTES &&
+    minutesOfDay < BUSINESS_END_MINUTES
+  );
+}
+
+function isRelevantGroupName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes("templates")) return false;
+  if (normalized.startsWith("test")) return false;
+  if (normalized === "discovered hosts") return false;
+  return true;
+}
+
+async function buildHostGroupNameMap(
+  problems: ZabbixProblem[],
+  allowedGroupNames: Set<string>
+) {
+  const hostIds = new Set<string>();
+  for (const problem of problems) {
+    for (const host of problem.hosts ?? []) {
+      if (host.hostid) {
+        hostIds.add(host.hostid);
+      }
+    }
+  }
+  const hosts = await fetchHostsByIds([...hostIds]);
+  const hostGroupMap = new Map<string, string[]>();
+
+  for (const host of hosts) {
+    const groupNames = (host.groups ?? [])
+      .map((group) => group.name)
+      .filter((name): name is string => Boolean(name))
+      .filter((name) => isRelevantGroupName(name))
+      .filter((name) => allowedGroupNames.has(name));
+    hostGroupMap.set(host.hostid, Array.from(new Set(groupNames)).sort());
+  }
+
+  return hostGroupMap;
+}
+
+function getGroupNamesForProblem(
+  problem: ZabbixProblem,
+  hostGroupNamesByHost: Map<string, string[]>
+) {
+  const groupSet = new Set<string>();
+  for (const host of problem.hosts ?? []) {
+    const names = hostGroupNamesByHost.get(host.hostid) ?? [];
+    for (const name of names) {
+      groupSet.add(name);
+    }
+  }
+  return Array.from(groupSet).sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+function formatGroupSelectionLabel(
+  groups: Array<{ name: string }>,
+  fallbackCount: number
+) {
+  if (!groups.length) {
+    if (fallbackCount === 1) return "1 host group selecionado";
+    if (fallbackCount > 1) return `${fallbackCount} host groups selecionados`;
+    return "Host groups selecionados";
+  }
+  const names = groups.map((group) => group.name);
+  if (names.length <= 2) {
+    return names.join(", ");
+  }
+  const [first, second] = names;
+  const remaining = names.length - 2;
+  return `${first}, ${second} +${remaining}`;
+}
+
 function deriveAlertType(
   items: ZabbixItem[],
   fallbackText: string
@@ -304,34 +437,81 @@ function deriveAlertType(
     )
   );
   const haystack = `${itemKeys.join(" ")} ${fallbackText}`.toLowerCase();
+  const isAgentAvailability = isAgentAvailabilityCheck(itemKeys, haystack);
+  const isSnmpTrap = isSnmpTrapSignal(itemKeys, haystack);
+  const isReachability = isReachabilitySignal(
+    haystack,
+    isAgentAvailability,
+    isSnmpTrap
+  );
 
   if (haystack.includes("icmpping") || haystack.includes("icmp")) {
-    return { alertType: "ICMP", itemKeys };
+    return { alertType: "ICMP", itemKeys, isReachability };
   }
   if (haystack.includes("snmp")) {
-    return { alertType: "SNMP", itemKeys };
+    return { alertType: "SNMP", itemKeys, isReachability };
   }
-  if (haystack.includes("agent")) {
-    return { alertType: "Zabbix agent", itemKeys };
+  if (isAgentAvailability) {
+    return { alertType: "Zabbix agent", itemKeys, isReachability };
   }
   if (haystack.includes("http") || haystack.includes("web")) {
-    return { alertType: "HTTP", itemKeys };
+    return { alertType: "HTTP", itemKeys, isReachability };
   }
   if (
     haystack.includes("net.tcp") ||
     haystack.includes("tcp") ||
     haystack.includes("udp")
   ) {
-    return { alertType: "Porta/TCP", itemKeys };
+    return { alertType: "Porta/TCP", itemKeys, isReachability };
   }
   if (haystack.includes("log")) {
-    return { alertType: "Log", itemKeys };
+    return { alertType: "Log", itemKeys, isReachability };
   }
   if (haystack.includes("system.uptime")) {
-    return { alertType: "Uptime", itemKeys };
+    return { alertType: "Uptime", itemKeys, isReachability };
   }
 
-  return { alertType: "Outro", itemKeys };
+  return { alertType: "Outro", itemKeys, isReachability };
+}
+
+function isAgentAvailabilityCheck(itemKeys: string[], haystack: string): boolean {
+  const keyHit = itemKeys.some((key) => {
+    const normalized = key.toLowerCase();
+    return (
+      normalized.includes("agent.ping") ||
+      normalized.includes("zabbix[host,agent,available]")
+    );
+  });
+  if (keyHit) return true;
+
+  return (
+    haystack.includes("agent is not available") ||
+    haystack.includes("zabbix agent is not available") ||
+    haystack.includes("agent not available") ||
+    haystack.includes("agent unavailable") ||
+    haystack.includes("agent is unreachable") ||
+    haystack.includes("zabbix agent is unreachable")
+  );
+}
+
+function isReachabilitySignal(
+  haystack: string,
+  isAgentAvailability: boolean,
+  isSnmpTrap: boolean
+): boolean {
+  if (isAgentAvailability) return true;
+  if (isSnmpTrap) return false;
+  if (haystack.includes("icmpping") || haystack.includes("icmp")) return true;
+  if (haystack.includes("snmp")) return true;
+  if (haystack.includes("system.uptime") || haystack.includes("uptime"))
+    return true;
+  return false;
+}
+
+function isSnmpTrapSignal(itemKeys: string[], haystack: string): boolean {
+  const keyHit = itemKeys.some((key) => key.toLowerCase().includes("snmptrap"));
+  if (keyHit) return true;
+  return haystack.includes("snmptrap") || haystack.includes("snmp trap");
 }
 
 async function buildTriggerTypeMapFromProblems(

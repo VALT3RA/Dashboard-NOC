@@ -136,8 +136,11 @@ function secondsToMinutes(value: number): number {
   return value / 60;
 }
 
-function isReachabilityAlertType(alertType: string): boolean {
-  return REACHABILITY_ALERT_TYPES.has(alertType.toLowerCase());
+function isReachabilityAlertType(info: TriggerTypeInfo): boolean {
+  return (
+    info.isReachability &&
+    REACHABILITY_ALERT_TYPES.has(info.alertType.toLowerCase())
+  );
 }
 
 function sumDowntimeForHosts(
@@ -357,7 +360,7 @@ export async function buildDashboardMetrics(
         : null;
     const triggerInfo = triggerId ? triggerTypeMap.get(triggerId) : null;
     const info = triggerInfo ?? deriveAlertType([], problem.name);
-    return isReachabilityAlertType(info.alertType);
+    return isReachabilityAlertType(info);
   };
 
   function isActive(host: ZabbixHost) {
@@ -1073,6 +1076,7 @@ type AlertImpactAccumulator = {
 type TriggerTypeInfo = {
   alertType: string;
   itemKeys: string[];
+  isReachability: boolean;
 };
 
 function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
@@ -1171,7 +1175,7 @@ function buildGroupSummaries({
             windowType: "business",
             windowLabel: businessWindowLabel,
             triggerTypeMap: triggerMap,
-            filterAlertType: (info) => isReachabilityAlertType(info.alertType),
+            filterAlertType: (info) => isReachabilityAlertType(info),
           })
         : undefined;
       const reachabilityOverallInsights = includeAvailabilityInsights
@@ -1183,7 +1187,7 @@ function buildGroupSummaries({
             windowType: "overall",
             windowLabel: "Periodo completo",
             triggerTypeMap: triggerMap,
-            filterAlertType: (info) => isReachabilityAlertType(info.alertType),
+            filterAlertType: (info) => isReachabilityAlertType(info),
           })
         : undefined;
 
@@ -1467,34 +1471,80 @@ function deriveAlertType(
     )
   );
   const haystack = `${itemKeys.join(" ")} ${fallbackText}`.toLowerCase();
+  const isAgentAvailability = isAgentAvailabilityCheck(itemKeys, haystack);
+  const isSnmpTrap = isSnmpTrapSignal(itemKeys, haystack);
+  const isReachability = isReachabilitySignal(
+    haystack,
+    isAgentAvailability,
+    isSnmpTrap
+  );
 
   if (haystack.includes("icmpping") || haystack.includes("icmp")) {
-    return { alertType: "ICMP", itemKeys };
+    return { alertType: "ICMP", itemKeys, isReachability };
   }
   if (haystack.includes("snmp")) {
-    return { alertType: "SNMP", itemKeys };
+    return { alertType: "SNMP", itemKeys, isReachability };
   }
-  if (haystack.includes("agent")) {
-    return { alertType: "Zabbix agent", itemKeys };
+  if (isAgentAvailability) {
+    return { alertType: "Zabbix agent", itemKeys, isReachability };
   }
   if (haystack.includes("http") || haystack.includes("web")) {
-    return { alertType: "HTTP", itemKeys };
+    return { alertType: "HTTP", itemKeys, isReachability };
   }
   if (
     haystack.includes("net.tcp") ||
     haystack.includes("tcp") ||
     haystack.includes("udp")
   ) {
-    return { alertType: "Porta/TCP", itemKeys };
+    return { alertType: "Porta/TCP", itemKeys, isReachability };
   }
   if (haystack.includes("log")) {
-    return { alertType: "Log", itemKeys };
+    return { alertType: "Log", itemKeys, isReachability };
   }
   if (haystack.includes("system.uptime")) {
-    return { alertType: "Uptime", itemKeys };
+    return { alertType: "Uptime", itemKeys, isReachability };
   }
 
-  return { alertType: "Outro", itemKeys };
+  return { alertType: "Outro", itemKeys, isReachability };
+}
+
+function isAgentAvailabilityCheck(itemKeys: string[], haystack: string): boolean {
+  const keyHit = itemKeys.some((key) => {
+    const normalized = key.toLowerCase();
+    return (
+      normalized.includes("agent.ping") ||
+      normalized.includes("zabbix[host,agent,available]")
+    );
+  });
+  if (keyHit) return true;
+
+  return (
+    haystack.includes("agent is not available") ||
+    haystack.includes("zabbix agent is not available") ||
+    haystack.includes("agent not available") ||
+    haystack.includes("agent unavailable") ||
+    haystack.includes("agent is unreachable") ||
+    haystack.includes("zabbix agent is unreachable")
+  );
+}
+
+function isReachabilitySignal(
+  haystack: string,
+  isAgentAvailability: boolean,
+  isSnmpTrap: boolean
+): boolean {
+  if (isAgentAvailability) return true;
+  if (isSnmpTrap) return false;
+  if (haystack.includes("icmpping") || haystack.includes("icmp")) return true;
+  if (haystack.includes("snmp")) return true;
+  if (haystack.includes("system.uptime") || haystack.includes("uptime")) return true;
+  return false;
+}
+
+function isSnmpTrapSignal(itemKeys: string[], haystack: string): boolean {
+  const keyHit = itemKeys.some((key) => key.toLowerCase().includes("snmptrap"));
+  if (keyHit) return true;
+  return haystack.includes("snmptrap") || haystack.includes("snmp trap");
 }
 
 function formatBusinessWindowLabel(): string {

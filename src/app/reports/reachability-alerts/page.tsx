@@ -19,12 +19,21 @@ export default async function ReachabilityAlertsPage({
     getFirst(resolvedParams?.month) ?? new Date().toISOString().slice(0, 7);
   const windowParam = getFirst(resolvedParams?.window);
   const window = windowParam === "overall" ? "overall" : "business";
+  const scopeParam = getFirst(resolvedParams?.scope);
+  const isAllScope = scopeParam === "all" || groupId === "all";
+  const groupIdsParam = getFirst(resolvedParams?.groupIds);
+  const groupIds = groupIdsParam
+    ? groupIdsParam
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    : undefined;
   const page =
     clampNumber(getFirst(resolvedParams?.page), 1, 100000) ?? 1;
   const pageSize =
     clampNumber(getFirst(resolvedParams?.pageSize), 10, 200) ?? 50;
 
-  if (!groupId) {
+  if (!groupId && !isAllScope) {
     return (
       <main className="min-h-screen bg-slate-100 py-10">
         <div className="mx-auto w-full space-y-6 px-4 sm:px-6 lg:px-10 xl:px-16">
@@ -52,7 +61,9 @@ export default async function ReachabilityAlertsPage({
   let report;
   try {
     report = await buildReachabilityReport({
-      groupId,
+      groupId: isAllScope ? undefined : groupId ?? undefined,
+      groupIds,
+      scope: isAllScope ? "all" : "group",
       month,
       window,
       page,
@@ -84,6 +95,7 @@ export default async function ReachabilityAlertsPage({
   const totalLabel =
     report.total === 1 ? "1 alerta" : `${report.total} alertas`;
   const pageNumbers = buildPageNumbers(report.page, report.pages);
+  const showGroupColumn = report.scope === "all";
 
   return (
     <main className="min-h-screen bg-slate-100 py-10">
@@ -102,12 +114,26 @@ export default async function ReachabilityAlertsPage({
               </p>
               <p className="text-xs text-slate-500">Total: {totalLabel}</p>
             </div>
-            <Link
-              href="/"
-              className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:text-slate-900"
-            >
-              Voltar ao dashboard
-            </Link>
+            <div className="flex flex-wrap items-center gap-3">
+              <a
+                href={buildExportHref({
+                  groupId: isAllScope ? undefined : groupId ?? undefined,
+                  groupIds,
+                  month,
+                  window,
+                  scope: isAllScope ? "all" : "group",
+                })}
+                className="rounded-2xl border border-emerald-200 bg-emerald-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500"
+              >
+                Exportar Excel
+              </a>
+              <Link
+                href="/"
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:text-slate-900"
+              >
+                Voltar ao dashboard
+              </Link>
+            </div>
           </div>
         </header>
 
@@ -130,10 +156,14 @@ export default async function ReachabilityAlertsPage({
             <table className="min-w-full divide-y divide-slate-100 text-sm text-slate-700">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
+                  {showGroupColumn && (
+                    <th className="px-3 py-3 text-left">Host group</th>
+                  )}
                   <th className="px-3 py-3 text-left">Alerta</th>
                   <th className="px-3 py-3 text-left">Tipo / Item</th>
                   <th className="px-3 py-3 text-left">Hosts</th>
                   <th className="px-3 py-3 text-left">Abertura</th>
+                  <th className="px-3 py-3 text-left">Janela abertura</th>
                   <th className="px-3 py-3 text-left">Fechamento</th>
                   <th className="px-3 py-3 text-right">Downtime janela</th>
                   <th className="px-3 py-3 text-right">Downtime total</th>
@@ -144,7 +174,7 @@ export default async function ReachabilityAlertsPage({
                 {report.alerts.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={showGroupColumn ? 10 : 9}
                       className="px-4 py-6 text-center text-slate-500"
                     >
                       Nenhum alerta de indisponibilidade encontrado.
@@ -157,8 +187,17 @@ export default async function ReachabilityAlertsPage({
                       alert.eventId,
                       alert.triggerId
                     );
+                    const groupLabel = alert.groupName ?? "Nao informado";
                     return (
                       <tr key={alert.eventId} className="hover:bg-slate-50/70">
+                        {showGroupColumn && (
+                          <td
+                            className="px-3 py-3 align-top text-xs font-semibold text-slate-700"
+                            title={groupLabel}
+                          >
+                            {groupLabel}
+                          </td>
+                        )}
                         <td className="px-3 py-3 align-top">
                           <p className="font-semibold text-slate-900">
                             {alert.name}
@@ -196,6 +235,17 @@ export default async function ReachabilityAlertsPage({
                         <td className="px-3 py-3 text-xs font-semibold text-slate-800">
                           {formatAlertDate(alert.openedAt)}
                         </td>
+                        <td className="px-3 py-3">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                              alert.openedInBusinessWindow
+                                ? "bg-sky-50 text-sky-700 ring-1 ring-sky-100"
+                                : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                            }`}
+                          >
+                            {alert.openedInBusinessWindow ? "7h-23:59" : "Fora"}
+                          </span>
+                        </td>
                         <td className="px-3 py-3 text-xs font-semibold text-slate-800">
                           {alert.closedAt
                             ? formatAlertDate(alert.closedAt)
@@ -231,9 +281,11 @@ export default async function ReachabilityAlertsPage({
               <div className="flex items-center gap-2">
                 <Link
                   href={buildPageHref({
-                    groupId,
+                    groupId: isAllScope ? undefined : groupId ?? undefined,
+                    groupIds,
                     month,
                     window,
+                    scope: isAllScope ? "all" : "group",
                     page: Math.max(1, report.page - 1),
                     pageSize: report.pageSize,
                   })}
@@ -247,9 +299,11 @@ export default async function ReachabilityAlertsPage({
                 </Link>
                 <Link
                   href={buildPageHref({
-                    groupId,
+                    groupId: isAllScope ? undefined : groupId ?? undefined,
+                    groupIds,
                     month,
                     window,
+                    scope: isAllScope ? "all" : "group",
                     page: Math.min(report.pages, report.page + 1),
                     pageSize: report.pageSize,
                   })}
@@ -267,9 +321,11 @@ export default async function ReachabilityAlertsPage({
                   <Link
                     key={number}
                     href={buildPageHref({
-                      groupId,
+                      groupId: isAllScope ? undefined : groupId ?? undefined,
+                      groupIds,
                       month,
                       window,
+                      scope: isAllScope ? "all" : "group",
                       page: number,
                       pageSize: report.pageSize,
                     })}
@@ -320,19 +376,51 @@ function buildPageNumbers(page: number, total: number): number[] {
 }
 
 function buildPageHref(params: {
-  groupId: string;
+  groupId?: string;
+  groupIds?: string[];
   month: string;
   window: "business" | "overall";
+  scope?: "group" | "all";
   page: number;
   pageSize: number;
 }) {
   const search = new URLSearchParams();
-  search.set("groupId", params.groupId);
+  if (params.groupId) {
+    search.set("groupId", params.groupId);
+  }
+  if (params.groupIds && params.groupIds.length) {
+    search.set("groupIds", params.groupIds.join(","));
+  }
+  if (params.scope === "all") {
+    search.set("scope", "all");
+  }
   search.set("month", params.month);
   search.set("window", params.window);
   search.set("page", String(params.page));
   search.set("pageSize", String(params.pageSize));
   return `/reports/reachability-alerts?${search.toString()}`;
+}
+
+function buildExportHref(params: {
+  groupId?: string;
+  groupIds?: string[];
+  month: string;
+  window: "business" | "overall";
+  scope?: "group" | "all";
+}) {
+  const search = new URLSearchParams();
+  if (params.groupId) {
+    search.set("groupId", params.groupId);
+  }
+  if (params.groupIds && params.groupIds.length) {
+    search.set("groupIds", params.groupIds.join(","));
+  }
+  if (params.scope === "all") {
+    search.set("scope", "all");
+  }
+  search.set("month", params.month);
+  search.set("window", params.window);
+  return `/api/reports/reachability-alerts?${search.toString()}`;
 }
 
 function formatAlertDate(value: string) {

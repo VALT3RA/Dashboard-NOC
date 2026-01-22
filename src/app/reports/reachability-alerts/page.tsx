@@ -188,8 +188,11 @@ export default async function ReachabilityAlertsPage({
                       alert.triggerId
                     );
                     const groupLabel = alert.groupName ?? "Nao informado";
+                    const rowKey = showGroupColumn
+                      ? `${alert.eventId}-${alert.groupName ?? "sem-grupo"}`
+                      : alert.eventId;
                     return (
-                      <tr key={alert.eventId} className="hover:bg-slate-50/70">
+                      <tr key={rowKey} className="hover:bg-slate-50/70">
                         {showGroupColumn && (
                           <td
                             className="px-3 py-3 align-top text-xs font-semibold text-slate-700"

@@ -293,11 +293,17 @@ function getRangeFromMonth(month: string): {
 
   const startDate = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0));
   const endDate = addMonths(startDate, 1);
+  const now = new Date();
+  const currentMonth = formatInTimeZone(now, DEFAULT_TIMEZONE, "yyyy-MM");
+  const isCurrentMonth = `${yearStr}-${monthStr}` === currentMonth;
+  const effectiveEndMs = isCurrentMonth
+    ? Math.min(endDate.getTime(), now.getTime())
+    : endDate.getTime();
   const labelDate = new Date(Date.UTC(year, monthIndex, 1, 12, 0, 0));
 
   return {
     startSeconds: Math.floor(startDate.getTime() / 1000),
-    endSeconds: Math.floor(endDate.getTime() / 1000),
+    endSeconds: Math.floor(effectiveEndMs / 1000),
     label: formatInTimeZone(labelDate, DEFAULT_TIMEZONE, "MMMM yyyy", {
       locale: ptBR,
     }),

@@ -260,12 +260,18 @@ function getRangeFromMonth(month: string): {
 
   const startDate = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0));
   const endDate = addMonths(startDate, 1);
+  const now = new Date();
+  const currentMonth = formatInTimeZone(now, DEFAULT_TIMEZONE, "yyyy-MM");
+  const isCurrentMonth = `${yearStr}-${monthStr}` === currentMonth;
+  const effectiveEndMs = isCurrentMonth
+    ? Math.min(endDate.getTime(), now.getTime())
+    : endDate.getTime();
 
   const labelDate = new Date(Date.UTC(year, monthIndex, 1, 12, 0, 0));
 
   return {
     startSeconds: Math.floor(startDate.getTime() / 1000),
-    endSeconds: Math.floor(endDate.getTime() / 1000),
+    endSeconds: Math.floor(effectiveEndMs / 1000),
     label: formatInTimeZone(labelDate, DEFAULT_TIMEZONE, "MMMM yyyy", {
       locale: ptBR,
     }),
@@ -595,6 +601,14 @@ export async function buildDashboardMetrics(
               if (!acc.openEventIds.has(eventKey)) {
                 acc.openEventIds.add(eventKey);
                 acc.openCount += 1;
+              }
+            }
+            if (reachabilityProblem) {
+              if (!acc.reachabilityEventIds.has(eventKey)) {
+                acc.reachabilityEventIds.add(eventKey);
+              }
+              if (!problem.r_eventid || problem.r_eventid === "0") {
+                acc.reachabilityOpenEventIds.add(eventKey);
               }
             }
             if (severityLevel !== null) {
@@ -1046,6 +1060,8 @@ type GroupAccumulator = {
   openCount: number;
   eventIds: Set<string>;
   openEventIds: Set<string>;
+  reachabilityEventIds: Set<string>;
+  reachabilityOpenEventIds: Set<string>;
   eventSeverities: Map<string, number>;
   impactIncidentIds: Set<string>;
   alertImpact: Map<string, AlertImpactAccumulator>;
@@ -1101,6 +1117,8 @@ function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
     openCount: 0,
     eventIds: new Set<string>(),
     openEventIds: new Set<string>(),
+    reachabilityEventIds: new Set<string>(),
+    reachabilityOpenEventIds: new Set<string>(),
     eventSeverities: new Map<string, number>(),
     impactIncidentIds: new Set<string>(),
     alertImpact: new Map<string, AlertImpactAccumulator>(),
@@ -1206,6 +1224,8 @@ function buildGroupSummaries({
         })),
         alerts: acc.eventIds.size,
         openAlerts: acc.openEventIds.size,
+        reachabilityAlerts: acc.reachabilityEventIds.size,
+        reachabilityEventIds: Array.from(acc.reachabilityEventIds),
         eventIds: Array.from(acc.eventIds),
         openEventIds: Array.from(acc.openEventIds),
         impactIncidentIds: Array.from(acc.impactIncidentIds),

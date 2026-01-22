@@ -104,6 +104,8 @@ export type HostGroupMetric = {
   severitySummary: SeveritySummary[];
   alerts: number;
   openAlerts: number;
+  reachabilityAlerts: number;
+  reachabilityEventIds?: string[];
   eventIds?: string[];
   openEventIds?: string[];
   eventSeverities?: EventSeveritySample[];

@@ -597,14 +597,14 @@ export function GlobalOverview() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-3">
             <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
-              Contego Security ?? Visuo Geral
+              Contego Security — Visão Geral
             </span>
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold text-slate-900 sm:text-4xl">
                 Indicadores Globais de Host Groups
               </h1>
               <p className="text-sm text-slate-500">
-                Alertas, tempos m?dios e disponibilidade por cliente/host group.
+                Alertas, tempos médios e disponibilidade por cliente/host group.
               </p>
             </div>
           </div>
@@ -613,7 +613,7 @@ export function GlobalOverview() {
               href="/reports/cap-switches-alerts"
               className="inline-flex items-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:text-slate-900"
             >
-              Relat�rio CAP Switches
+              Relatório CAP Switches
             </Link>
             <Link
               href="/open-problems"
@@ -1633,6 +1633,16 @@ function GroupTable({
     allHostsSearch.set("groupIds", selectedGroupIds.join(","));
   }
   const allHostsHref = `/reports/reachability-alerts?${allHostsSearch.toString()}`;
+  const availabilityTooltip =
+    "Disponibilidade = (tempo_total - downtime) / tempo_total. Tempo_total = hosts ativos x janela do periodo. Downtime = soma do tempo de alerta por host (sobreposicoes no mesmo host consolidadas).";
+  const availabilityBusinessTooltip =
+    "Mesma regra da disponibilidade geral, usando somente a janela 7h-23:59.";
+  const reachabilityTooltip =
+    "Disponibilidade host considera apenas alertas de indisponibilidade (ICMP, SNMP polling, Uptime e Zabbix agent availability). SNMP trap excluido.";
+  const reachabilityBusinessTooltip =
+    "Mesma regra da disponibilidade host, usando somente a janela 7h-23:59.";
+  const reachabilityCountTooltip =
+    "Total de alertas classificados como indisponibilidade (reachability) no periodo. Clique para detalhar.";
 
   return (
     <div className={`rounded-2xl border ${CONTAINER_BORDER_CLASS}`}>
@@ -1753,6 +1763,19 @@ function GroupTable({
               </HeaderCell>
               <HeaderCell
                 align="center"
+                icon={<AlertTriangle className="h-5 w-5" />}
+                dividerClass={COLUMN_DIVIDER_CLASS}
+                exporting={exporting}
+              >
+                <span
+                  className="cursor-help underline decoration-dotted underline-offset-4"
+                  title={reachabilityCountTooltip}
+                >
+                  Indisponibilidades
+                </span>
+              </HeaderCell>
+              <HeaderCell
+                align="center"
                 icon={<Bell className="h-5 w-5" />}
                 dividerClass={COLUMN_DIVIDER_CLASS}
                 exporting={exporting}
@@ -1781,7 +1804,12 @@ function GroupTable({
                 dividerClass={COLUMN_DIVIDER_CLASS}
                 exporting={exporting}
               >
-                Disponibilidade (alertas)
+                <span
+                  className="cursor-help underline decoration-dotted underline-offset-4"
+                  title={availabilityTooltip}
+                >
+                  Disponibilidade (alertas)
+                </span>
               </HeaderCell>
               <HeaderCell
                 align="center"
@@ -1789,7 +1817,12 @@ function GroupTable({
                 dividerClass={COLUMN_DIVIDER_CLASS}
                 exporting={exporting}
               >
-                Disponibilidade (alertas 7h-23:59)
+                <span
+                  className="cursor-help underline decoration-dotted underline-offset-4"
+                  title={availabilityBusinessTooltip}
+                >
+                  Disponibilidade (alertas 7h-23:59)
+                </span>
               </HeaderCell>
               <HeaderCell
                 align="center"
@@ -1798,7 +1831,12 @@ function GroupTable({
                 exporting={exporting}
               >
                 <span className="flex flex-col items-center gap-1">
-                  <span>Disponibilidade host</span>
+                  <span
+                    className="cursor-help underline decoration-dotted underline-offset-4"
+                    title={reachabilityTooltip}
+                  >
+                    Disponibilidade host
+                  </span>
                   {!exporting && (
                     <Link
                       href={allHostsHref}
@@ -1815,7 +1853,12 @@ function GroupTable({
                 dividerClass={COLUMN_DIVIDER_CLASS}
                 exporting={exporting}
               >
-                Disponibilidade host (7h-23:59)
+                <span
+                  className="cursor-help underline decoration-dotted underline-offset-4"
+                  title={reachabilityBusinessTooltip}
+                >
+                  Disponibilidade host (7h-23:59)
+                </span>
               </HeaderCell>
             </tr>
           </thead>
@@ -1825,7 +1868,7 @@ function GroupTable({
             {loading && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={12}
                   className={`px-4 py-6 text-center ${exporting ? "text-white/80" : "text-slate-500"}`}
                 >
                   Carregando métricas...
@@ -1835,7 +1878,7 @@ function GroupTable({
             {!loading && processedRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={12}
                   className={`px-4 py-6 text-center ${exporting ? "text-white/80" : "text-slate-500"}`}
                 >
                   {hasFilterApplied
@@ -1886,6 +1929,41 @@ function GroupTable({
                       </button>
                     ) : (
                       group.alerts
+                    )}
+                  </td>
+                  <td
+                    className={`px-4 py-3 text-right text-base md:text-lg ${COLUMN_DIVIDER_CLASS} ${textPrimaryClass}`}
+                  >
+                    {group.reachabilityAlerts > 0 ? (
+                      <button
+                        type="button"
+                        className="font-semibold text-blue-700 underline decoration-dotted underline-offset-4 transition hover:text-blue-900"
+                        onClick={() => {
+                          const reachabilityIds = new Set(
+                            group.reachabilityEventIds ?? []
+                          );
+                          const reachabilityAlerts =
+                            group.alertDetails?.filter((alert) =>
+                              reachabilityIds.has(alert.eventId)
+                            ) ?? [];
+                          if (reachabilityAlerts.length) {
+                            setSelectedGroupLabel(
+                              `${group.name} - Indisponibilidades`
+                            );
+                            setSelectedAlerts(
+                              [...reachabilityAlerts].sort(
+                                (a, b) =>
+                                  new Date(b.openedAt).getTime() -
+                                  new Date(a.openedAt).getTime()
+                              )
+                            );
+                          }
+                        }}
+                      >
+                        {group.reachabilityAlerts}
+                      </button>
+                    ) : (
+                      group.reachabilityAlerts
                     )}
                   </td>
                   <td
@@ -2455,7 +2533,7 @@ function HostRosterModal({
       csvSafe(host.groups.join(" | ")),
     ]);
     const csv = [header.join(","), ...rows.map((row) => row.join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `hosts-${Date.now()}.csv`;

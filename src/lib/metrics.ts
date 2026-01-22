@@ -708,6 +708,7 @@ export async function buildDashboardMetrics(
       acc.reachabilityDowntimeTotal = 0;
       acc.reachabilityDowntimeBusiness = 0;
       acc.hostDowntime = new Map<string, HostImpactAccumulator>();
+      acc.reachabilityHostDowntime = new Map<string, HostImpactAccumulator>();
       for (const hostId of acc.activeHostIds) {
         const downtime = hostDowntime.get(hostId) ?? {
           total: 0,
@@ -729,6 +730,13 @@ export async function buildDashboardMetrics(
           total: downtime.total,
           business: downtime.business,
           off: downtime.off,
+        });
+        acc.reachabilityHostDowntime.set(hostId, {
+          hostid: hostId,
+          name: hostNameMap.get(hostId) ?? hostId,
+          total: reachability.total,
+          business: reachability.business,
+          off: reachability.off,
         });
       }
     }
@@ -1030,6 +1038,7 @@ type GroupAccumulator = {
   reachabilityDowntimeTotal: number;
   reachabilityDowntimeBusiness: number;
   hostDowntime: Map<string, HostImpactAccumulator>;
+  reachabilityHostDowntime: Map<string, HostImpactAccumulator>;
   eventCount: number;
   openCount: number;
   eventIds: Set<string>;
@@ -1083,6 +1092,7 @@ function createGroupAccumulator(group: ZabbixHostGroup): GroupAccumulator {
     reachabilityDowntimeTotal: 0,
     reachabilityDowntimeBusiness: 0,
     hostDowntime: new Map<string, HostImpactAccumulator>(),
+    reachabilityHostDowntime: new Map<string, HostImpactAccumulator>(),
     eventCount: 0,
     openCount: 0,
     eventIds: new Set<string>(),
@@ -1140,13 +1150,41 @@ function buildGroupSummaries({
               totalBusinessSeconds) *
             100
           : 100;
+      const triggerMap = triggerTypeMap ?? new Map<string, TriggerTypeInfo>();
       const availabilityInsights = includeAvailabilityInsights
-        ? buildAvailabilityInsights(
-            acc,
-            businessSeconds,
-            triggerTypeMap ?? new Map<string, TriggerTypeInfo>(),
-            businessWindowLabel
-          )
+        ? buildAvailabilityInsights({
+            hostDowntime: acc.hostDowntime,
+            alertImpact: acc.alertImpact,
+            groupDowntimeSeconds: acc.downtimeBusiness,
+            windowSeconds: businessSeconds,
+            windowType: "business",
+            windowLabel: businessWindowLabel,
+            triggerTypeMap: triggerMap,
+          })
+        : undefined;
+      const reachabilityInsights = includeAvailabilityInsights
+        ? buildAvailabilityInsights({
+            hostDowntime: acc.reachabilityHostDowntime,
+            alertImpact: acc.alertImpact,
+            groupDowntimeSeconds: acc.reachabilityDowntimeBusiness,
+            windowSeconds: businessSeconds,
+            windowType: "business",
+            windowLabel: businessWindowLabel,
+            triggerTypeMap: triggerMap,
+            filterAlertType: (info) => isReachabilityAlertType(info.alertType),
+          })
+        : undefined;
+      const reachabilityOverallInsights = includeAvailabilityInsights
+        ? buildAvailabilityInsights({
+            hostDowntime: acc.reachabilityHostDowntime,
+            alertImpact: acc.alertImpact,
+            groupDowntimeSeconds: acc.reachabilityDowntimeTotal,
+            windowSeconds: totalRangeSeconds,
+            windowType: "overall",
+            windowLabel: "Periodo completo",
+            triggerTypeMap: triggerMap,
+            filterAlertType: (info) => isReachabilityAlertType(info.alertType),
+          })
         : undefined;
 
       return {
@@ -1182,6 +1220,8 @@ function buildGroupSummaries({
         businessReachabilityPct,
         ...(includeAlertDetails ? { alertDetails: acc.alertDetails } : {}),
         ...(availabilityInsights ? { availabilityInsights } : {}),
+        ...(reachabilityInsights ? { reachabilityInsights } : {}),
+        ...(reachabilityOverallInsights ? { reachabilityOverallInsights } : {}),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
@@ -1289,47 +1329,63 @@ function mergeIntervals(intervals: Interval[]): Interval[] {
   return merged;
 }
 
-function buildAvailabilityInsights(
-  acc: GroupAccumulator,
-  businessSeconds: number,
-  triggerTypeMap: Map<string, TriggerTypeInfo>,
-  businessWindowLabel: string
-): AvailabilityInsights {
-  const totalBusinessDowntime = acc.downtimeBusiness;
-  const totalBusinessMinutes = secondsToMinutes(totalBusinessDowntime);
+function buildAvailabilityInsights({
+  hostDowntime,
+  alertImpact,
+  groupDowntimeSeconds,
+  windowSeconds,
+  windowType,
+  windowLabel,
+  triggerTypeMap,
+  filterAlertType,
+}: {
+  hostDowntime: Map<string, HostImpactAccumulator>;
+  alertImpact: Map<string, AlertImpactAccumulator>;
+  groupDowntimeSeconds: number;
+  windowSeconds: number;
+  windowType: "business" | "overall";
+  windowLabel: string;
+  triggerTypeMap: Map<string, TriggerTypeInfo>;
+  filterAlertType?: (info: TriggerTypeInfo) => boolean;
+}): AvailabilityInsights {
+  const windowKey: "business" | "total" =
+    windowType === "business" ? "business" : "total";
+  const groupDowntimeMinutes = secondsToMinutes(groupDowntimeSeconds);
 
   const topHosts: AvailabilityHostImpact[] = Array.from(
-    acc.hostDowntime.values()
+    hostDowntime.values()
   )
-    .filter((entry) => entry.business > 0)
-    .sort((a, b) => b.business - a.business)
+    .filter((entry) => entry[windowKey] > 0)
+    .sort((a, b) => b[windowKey] - a[windowKey])
     .slice(0, MAX_INSIGHT_ITEMS)
     .map((entry) => ({
       hostid: entry.hostid,
       name: entry.name,
-      businessDowntimeMinutes: secondsToMinutes(entry.business),
+      windowDowntimeMinutes: secondsToMinutes(entry[windowKey]),
       totalDowntimeMinutes: secondsToMinutes(entry.total),
-      businessAvailabilityPct:
-        businessSeconds > 0
-          ? ((businessSeconds - entry.business) / businessSeconds) * 100
+      windowAvailabilityPct:
+        windowSeconds > 0
+          ? ((windowSeconds - entry[windowKey]) / windowSeconds) * 100
           : 100,
-      shareOfGroupBusinessDowntimePct: totalBusinessDowntime
-        ? (entry.business / totalBusinessDowntime) * 100
+      shareOfGroupWindowDowntimePct: groupDowntimeSeconds
+        ? (entry[windowKey] / groupDowntimeSeconds) * 100
         : 0,
     }));
 
   const topAlerts: AvailabilityAlertImpact[] = Array.from(
-    acc.alertImpact.values()
+    alertImpact.values()
   )
-    .filter((entry) => entry.business > 0)
-    .sort((a, b) => b.business - a.business)
-    .slice(0, MAX_INSIGHT_ITEMS)
+    .filter((entry) => entry[windowKey] > 0)
+    .sort((a, b) => b[windowKey] - a[windowKey])
     .map((entry) => {
       const fallback = deriveAlertType([], entry.name);
       const triggerInfo = entry.triggerId
         ? triggerTypeMap.get(entry.triggerId)
         : null;
       const info = triggerInfo ?? fallback;
+      if (filterAlertType && !filterAlertType(info)) {
+        return null;
+      }
       const hostNames = Array.from(entry.hostNames).sort((a, b) =>
         a.localeCompare(b, "pt-BR")
       );
@@ -1343,20 +1399,25 @@ function buildAvailabilityInsights(
         severity: entry.severity,
         openedAt: entry.openedAt,
         closedAt: entry.closedAt,
-        businessDowntimeMinutes: secondsToMinutes(entry.business),
+        windowDowntimeMinutes: secondsToMinutes(entry[windowKey]),
         totalDowntimeMinutes: secondsToMinutes(entry.total),
-        shareOfGroupBusinessDowntimePct: totalBusinessDowntime
-          ? (entry.business / totalBusinessDowntime) * 100
+        shareOfGroupWindowDowntimePct: groupDowntimeSeconds
+          ? (entry[windowKey] / groupDowntimeSeconds) * 100
           : 0,
         hostNames,
         alertType: info.alertType,
         itemKeys,
       };
-    });
+    })
+    .filter(
+      (entry): entry is AvailabilityAlertImpact => entry !== null
+    )
+    .slice(0, MAX_INSIGHT_ITEMS);
 
   return {
-    businessWindowLabel,
-    groupBusinessDowntimeMinutes: totalBusinessMinutes,
+    windowType,
+    windowLabel,
+    groupDowntimeMinutes,
     topHosts,
     topAlerts,
   };

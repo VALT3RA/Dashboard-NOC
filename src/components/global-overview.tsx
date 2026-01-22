@@ -761,6 +761,7 @@ export function GlobalOverview() {
           rows={filteredGroups}
           loading={loading}
           zabbixBaseUrl={zabbixBaseUrl}
+          month={month}
         />
       )}
 
@@ -1480,18 +1481,38 @@ function OverviewCards({
 }
 
 
+type AvailabilitySortField =
+  | "availability"
+  | "availabilityBusiness"
+  | "reachability"
+  | "reachabilityBusiness";
+
 function GroupTable({
   rows,
   loading,
   zabbixBaseUrl,
+  month,
 }: {
   rows: HostGroupMetric[];
   loading: boolean;
   zabbixBaseUrl: string | null;
+  month: string;
 }) {
   const AVAILABILITY_TARGET = 99.5;
   const BUSINESS_AVAILABILITY_TARGET = 99.0;
-  const [businessSort, setBusinessSort] = useState<"asc" | "desc">("desc");
+  const availabilitySortOptions: Array<{
+    value: AvailabilitySortField;
+    label: string;
+  }> = [
+    { value: "availabilityBusiness", label: "Alertas (7h-23:59)" },
+    { value: "availability", label: "Alertas (geral)" },
+    { value: "reachabilityBusiness", label: "Host (7h-23:59)" },
+    { value: "reachability", label: "Host (geral)" },
+  ];
+  const [availabilitySortField, setAvailabilitySortField] =
+    useState<AvailabilitySortField>("availabilityBusiness");
+  const [availabilitySortOrder, setAvailabilitySortOrder] =
+    useState<"asc" | "desc">("desc");
   const [businessFilter, setBusinessFilter] = useState<
     "all" | "below" | "within"
   >("all");
@@ -1504,6 +1525,9 @@ function GroupTable({
   const [availabilityModal, setAvailabilityModal] = useState<{
     groupLabel: string;
     insights: AvailabilityInsights | null;
+    title: string;
+    viewAllHref?: string;
+    viewAllLabel?: string;
   } | null>(null);
   const exportTargetRef = useRef<HTMLDivElement | null>(null);
   const textPrimaryClass = exporting ? "text-white" : "text-slate-800";
@@ -1526,12 +1550,25 @@ function GroupTable({
         ? base.filter((group) => group.businessAvailabilityPct >= BUSINESS_AVAILABILITY_TARGET)
         : base;
 
-    return filtered.sort((a, b) =>
-      businessSort === "asc"
-        ? a.businessAvailabilityPct - b.businessAvailabilityPct
-        : b.businessAvailabilityPct - a.businessAvailabilityPct
-    );
-  }, [rows, businessFilter, businessSort]);
+    const getAvailabilityValue = (group: HostGroupMetric) => {
+      switch (availabilitySortField) {
+        case "availability":
+          return group.availabilityPct;
+        case "reachability":
+          return group.reachabilityPct;
+        case "reachabilityBusiness":
+          return group.businessReachabilityPct;
+        case "availabilityBusiness":
+        default:
+          return group.businessAvailabilityPct;
+      }
+    };
+
+    return filtered.sort((a, b) => {
+      const delta = getAvailabilityValue(a) - getAvailabilityValue(b);
+      return availabilitySortOrder === "asc" ? delta : -delta;
+    });
+  }, [rows, businessFilter, availabilitySortField, availabilitySortOrder]);
 
   const hasFilterApplied = businessFilter !== "all";
 
@@ -1539,6 +1576,27 @@ function GroupTable({
     setAvailabilityModal({
       groupLabel: group.name,
       insights: group.availabilityInsights ?? null,
+      title: "Disponibilidade (alertas 7h-23:59)",
+    });
+  };
+
+  const handleReachabilityDetails = (
+    group: HostGroupMetric,
+    window: "overall" | "business"
+  ) => {
+    const viewAllHref = `/reports/reachability-alerts?groupId=${group.groupid}&month=${month}&window=${window}`;
+    setAvailabilityModal({
+      groupLabel: group.name,
+      insights:
+        window === "business"
+          ? group.reachabilityInsights ?? null
+          : group.reachabilityOverallInsights ?? null,
+      title:
+        window === "business"
+          ? "Disponibilidade host (7h-23:59)"
+          : "Disponibilidade host",
+      viewAllHref,
+      viewAllLabel: "Ver todos",
     });
   };
 
@@ -1577,18 +1635,38 @@ function GroupTable({
           Disponibilidade (alertas 7h-23:59) - meta {BUSINESS_AVAILABILITY_TARGET.toFixed(1)}%
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-sm">
+            <span className="text-xs font-semibold text-slate-500">
+              Ordenar por
+            </span>
+            <select
+              value={availabilitySortField}
+              onChange={(event) =>
+                setAvailabilitySortField(
+                  event.target.value as AvailabilitySortField
+                )
+              }
+              className="bg-transparent text-sm font-semibold text-slate-700 focus:outline-none"
+            >
+              {availabilitySortOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <button
             type="button"
             onClick={() =>
-              setBusinessSort((prev) => (prev === "asc" ? "desc" : "asc"))
+              setAvailabilitySortOrder((prev) => (prev === "asc" ? "desc" : "asc"))
             }
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
           >
             <ArrowUpDown
-              className={`h-4 w-4 ${businessSort === "asc" ? "rotate-180" : ""}`}
+              className={`h-4 w-4 ${availabilitySortOrder === "asc" ? "rotate-180" : ""}`}
               aria-hidden
             />
-            {businessSort === "asc" ? "Menor → maior" : "Maior → menor"}
+            {availabilitySortOrder === "asc" ? "Menor → maior" : "Maior → menor"}
           </button>
           <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {[
@@ -1833,6 +1911,9 @@ function GroupTable({
                       target={AVAILABILITY_TARGET}
                       label="Geral"
                       exporting={exporting}
+                      onDetailsClick={() =>
+                        handleReachabilityDetails(group, "overall")
+                      }
                     />
                   </td>
                   <td
@@ -1843,6 +1924,9 @@ function GroupTable({
                       target={BUSINESS_AVAILABILITY_TARGET}
                       label="Comercial"
                       exporting={exporting}
+                      onDetailsClick={() =>
+                        handleReachabilityDetails(group, "business")
+                      }
                     />
                   </td>
                 </tr>
@@ -1864,6 +1948,9 @@ function GroupTable({
         onClose={() => setAvailabilityModal(null)}
         groupLabel={availabilityModal?.groupLabel ?? ""}
         insights={availabilityModal?.insights ?? null}
+        title={availabilityModal?.title ?? "Disponibilidade"}
+        viewAllHref={availabilityModal?.viewAllHref}
+        viewAllLabel={availabilityModal?.viewAllLabel}
         zabbixBaseUrl={zabbixBaseUrl}
       />
     </div>
@@ -1997,6 +2084,9 @@ type AvailabilityInsightsModalProps = {
   onClose: () => void;
   groupLabel: string;
   insights: AvailabilityInsights | null;
+  title: string;
+  viewAllHref?: string;
+  viewAllLabel?: string;
   zabbixBaseUrl: string | null;
 };
 
@@ -2005,9 +2095,23 @@ function AvailabilityInsightsModal({
   onClose,
   groupLabel,
   insights,
+  title,
+  viewAllHref,
+  viewAllLabel,
   zabbixBaseUrl,
 }: AvailabilityInsightsModalProps) {
   if (!open) return null;
+
+  const windowLabelPrefix =
+    insights?.windowType === "overall" ? "Periodo" : "Janela comercial";
+  const downtimeLabel =
+    insights?.windowType === "overall"
+      ? "Downtime total"
+      : "Downtime comercial total";
+  const downtimeColumnLabel =
+    insights?.windowType === "overall"
+      ? "Downtime (total)"
+      : "Downtime (comercial)";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8">
@@ -2015,38 +2119,48 @@ function AvailabilityInsightsModal({
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-6 py-4">
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">
-              Disponibilidade (alertas 7h-23:59)
+              {title}
             </p>
             <h3 className="text-lg font-semibold text-slate-900">
               Detalhamento - {groupLabel || "Host group"}
             </h3>
-            {insights?.businessWindowLabel && (
+            {insights?.windowLabel && (
               <p className="text-sm text-slate-500">
-                Janela comercial: {insights.businessWindowLabel}
+                {windowLabelPrefix}: {insights.windowLabel}
               </p>
             )}
             {insights && (
               <p className="text-sm text-slate-500">
                 <span
-                  title="Soma do downtime por host na janela comercial, sem sobreposicoes por host."
+                  title="Soma do downtime por host na janela selecionada, sem sobreposicoes por host."
                   className="cursor-help underline decoration-dotted underline-offset-4"
                 >
-                  Downtime comercial total
+                  {downtimeLabel}
                 </span>
                 :{" "}
                 <span className="font-semibold text-slate-900">
-                  {formatDurationMinutes(insights.groupBusinessDowntimeMinutes)}
+                  {formatDurationMinutes(insights.groupDowntimeMinutes)}
                 </span>
               </p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
-          >
-            Fechar
-          </button>
+          <div className="flex items-center gap-2">
+            {viewAllHref && (
+              <Link
+                href={viewAllHref}
+                className="rounded-full border border-blue-200 bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500"
+              >
+                {viewAllLabel ?? "Ver todos"}
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200"
+            >
+              Fechar
+            </button>
+          </div>
         </div>
         <div className="max-h-[72vh] overflow-y-auto px-6 py-5">
           {!insights ? (
@@ -2061,12 +2175,12 @@ function AvailabilityInsightsModal({
                     Hosts mais impactados
                   </p>
                   <p className="text-sm text-slate-500">
-                    Ranking por downtime dentro da janela comercial.
+                    Ranking por downtime dentro da janela selecionada.
                   </p>
                 </div>
                 {insights.topHosts.length === 0 ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-                    Nenhum downtime comercial registrado para este grupo.
+                    Nenhum downtime registrado para este grupo.
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
@@ -2083,15 +2197,15 @@ function AvailabilityInsightsModal({
                           </th>
                           <th className="px-3 py-3 text-right">
                             <span
-                              title="Tempo acumulado de indisponibilidade dentro da janela comercial, sem sobreposicoes."
+                              title="Tempo acumulado de indisponibilidade dentro da janela selecionada, sem sobreposicoes."
                               className="cursor-help underline decoration-dotted underline-offset-4"
                             >
-                              Downtime (comercial)
+                              {downtimeColumnLabel}
                             </span>
                           </th>
                           <th className="px-3 py-3 text-right">
                             <span
-                              title="Participacao deste host no downtime comercial total do grupo."
+                              title="Participacao deste host no downtime da janela selecionada."
                               className="cursor-help underline decoration-dotted underline-offset-4"
                             >
                               % do grupo
@@ -2099,7 +2213,7 @@ function AvailabilityInsightsModal({
                           </th>
                           <th className="px-3 py-3 text-right">
                             <span
-                              title="Disponibilidade do host na janela comercial: 1 - (downtime comercial / tempo comercial do periodo)."
+                              title="Disponibilidade do host na janela selecionada."
                               className="cursor-help underline decoration-dotted underline-offset-4"
                             >
                               Disponibilidade
@@ -2114,13 +2228,13 @@ function AvailabilityInsightsModal({
                               {host.name}
                             </td>
                             <td className="px-3 py-3 text-right font-semibold text-slate-900">
-                              {formatDurationMinutes(host.businessDowntimeMinutes)}
+                              {formatDurationMinutes(host.windowDowntimeMinutes)}
                             </td>
                             <td className="px-3 py-3 text-right text-slate-600">
-                              {host.shareOfGroupBusinessDowntimePct.toFixed(1)}%
+                              {host.shareOfGroupWindowDowntimePct.toFixed(1)}%
                             </td>
                             <td className="px-3 py-3 text-right font-semibold text-slate-900">
-                              {host.businessAvailabilityPct.toFixed(2)}%
+                              {host.windowAvailabilityPct.toFixed(2)}%
                             </td>
                           </tr>
                         ))}
@@ -2190,15 +2304,15 @@ function AvailabilityInsightsModal({
                           </th>
                           <th className="px-3 py-3 text-right">
                             <span
-                              title="Tempo do alerta dentro da janela comercial. Pode sobrepor outros alertas."
+                              title="Tempo do alerta dentro da janela selecionada. Pode sobrepor outros alertas."
                               className="cursor-help underline decoration-dotted underline-offset-4"
                             >
-                              Downtime (comercial)
+                              {downtimeColumnLabel}
                             </span>
                           </th>
                           <th className="px-3 py-3 text-right">
                             <span
-                              title="Participacao deste alerta no downtime comercial total do grupo (nao desconta sobreposicoes)."
+                              title="Participacao deste alerta no downtime da janela selecionada (nao desconta sobreposicoes)."
                               className="cursor-help underline decoration-dotted underline-offset-4"
                             >
                               % do grupo
@@ -2254,10 +2368,10 @@ function AvailabilityInsightsModal({
                               {alert.closedAt ? formatAlertDate(alert.closedAt) : "Em aberto"}
                             </td>
                             <td className="px-3 py-3 text-right font-semibold text-slate-900">
-                              {formatDurationMinutes(alert.businessDowntimeMinutes)}
+                              {formatDurationMinutes(alert.windowDowntimeMinutes)}
                             </td>
                             <td className="px-3 py-3 text-right text-slate-600">
-                              {alert.shareOfGroupBusinessDowntimePct.toFixed(1)}%
+                              {alert.shareOfGroupWindowDowntimePct.toFixed(1)}%
                             </td>
                             </tr>
                           );

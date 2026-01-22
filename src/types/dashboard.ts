@@ -28,10 +28,10 @@ export type HostMetric = {
 export type AvailabilityHostImpact = {
   hostid: string;
   name: string;
-  businessDowntimeMinutes: number;
+  windowDowntimeMinutes: number;
   totalDowntimeMinutes: number;
-  businessAvailabilityPct: number;
-  shareOfGroupBusinessDowntimePct: number;
+  windowAvailabilityPct: number;
+  shareOfGroupWindowDowntimePct: number;
 };
 
 export type AvailabilityAlertImpact = {
@@ -41,17 +41,18 @@ export type AvailabilityAlertImpact = {
   severity: number;
   openedAt: string;
   closedAt: string | null;
-  businessDowntimeMinutes: number;
+  windowDowntimeMinutes: number;
   totalDowntimeMinutes: number;
-  shareOfGroupBusinessDowntimePct: number;
+  shareOfGroupWindowDowntimePct: number;
   hostNames: string[];
   alertType: string;
   itemKeys: string[];
 };
 
 export type AvailabilityInsights = {
-  businessWindowLabel: string;
-  groupBusinessDowntimeMinutes: number;
+  windowType: "business" | "overall";
+  windowLabel: string;
+  groupDowntimeMinutes: number;
   topHosts: AvailabilityHostImpact[];
   topAlerts: AvailabilityAlertImpact[];
 };
@@ -116,6 +117,8 @@ export type HostGroupMetric = {
   reachabilityPct: number;
   businessReachabilityPct: number;
   availabilityInsights?: AvailabilityInsights;
+  reachabilityInsights?: AvailabilityInsights;
+  reachabilityOverallInsights?: AvailabilityInsights;
 };
 
 export type DashboardMetrics = {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { buildReachabilityReport } from "@/lib/reachability-report";
 import { getZabbixBaseUrl } from "@/lib/zabbix";
 import { formatDurationMinutes } from "@/lib/time-format";
@@ -163,6 +164,7 @@ export default async function ReachabilityAlertsPage({
                   <th className="px-3 py-3 text-left">Tipo / Item</th>
                   <th className="px-3 py-3 text-left">Hosts</th>
                   <th className="px-3 py-3 text-left">Abertura</th>
+                  <th className="px-3 py-3 text-left">Dia da semana</th>
                   <th className="px-3 py-3 text-left">Janela abertura</th>
                   <th className="px-3 py-3 text-left">Fechamento</th>
                   <th className="px-3 py-3 text-right">Downtime janela</th>
@@ -174,7 +176,7 @@ export default async function ReachabilityAlertsPage({
                 {report.alerts.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={showGroupColumn ? 10 : 9}
+                      colSpan={showGroupColumn ? 11 : 10}
                       className="px-4 py-6 text-center text-slate-500"
                     >
                       Nenhum alerta de indisponibilidade encontrado.
@@ -237,6 +239,9 @@ export default async function ReachabilityAlertsPage({
                         </td>
                         <td className="px-3 py-3 text-xs font-semibold text-slate-800">
                           {formatAlertDate(alert.openedAt)}
+                        </td>
+                        <td className="px-3 py-3 text-xs font-semibold text-slate-700">
+                          {formatAlertWeekday(alert.openedAt)}
                         </td>
                         <td className="px-3 py-3">
                           <span
@@ -429,6 +434,14 @@ function buildExportHref(params: {
 function formatAlertDate(value: string) {
   try {
     return format(new Date(value), "dd/MM/yyyy HH:mm");
+  } catch {
+    return "-";
+  }
+}
+
+function formatAlertWeekday(value: string) {
+  try {
+    return format(new Date(value), "EEEE", { locale: ptBR });
   } catch {
     return "-";
   }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { formatInTimeZone } from "date-fns-tz";
+import { ptBR } from "date-fns/locale";
 import { buildReachabilityReport } from "@/lib/reachability-report";
 import { formatDurationMinutes } from "@/lib/time-format";
 
@@ -39,8 +40,8 @@ export async function GET(request: Request) {
   });
 
   const header = isAllScope
-    ? "host_group,event_id,alerta,severidade,tipo,item_keys,hosts,abertura,janela_abertura,fechamento,downtime_janela,downtime_total,status"
-    : "event_id,alerta,severidade,tipo,item_keys,hosts,abertura,janela_abertura,fechamento,downtime_janela,downtime_total,status";
+    ? "host_group,event_id,alerta,severidade,tipo,item_keys,hosts,abertura,dia_semana_abertura,janela_abertura,fechamento,downtime_janela,downtime_total,status"
+    : "event_id,alerta,severidade,tipo,item_keys,hosts,abertura,dia_semana_abertura,janela_abertura,fechamento,downtime_janela,downtime_total,status";
   const rows = report.alerts.map((alert) => {
     const baseCells = [
       alert.eventId,
@@ -50,6 +51,7 @@ export async function GET(request: Request) {
       csvSafe(alert.itemKeys.join(" | ")),
       csvSafe(alert.hostNames.join(" | ")),
       formatExportDate(alert.openedAt),
+      formatExportWeekday(alert.openedAt),
       alert.openedInBusinessWindow ? "7h-23:59" : "Fora",
       formatExportDate(alert.closedAt),
       formatDurationMinutes(alert.windowMinutes),
@@ -65,7 +67,7 @@ export async function GET(request: Request) {
     return cells.join(",");
   });
 
-  const csv = [header, ...rows].join("\n");
+  const csv = `\uFEFF${[header, ...rows].join("\n")}`;
   const filenameScope = isAllScope ? "all" : groupId ?? "group";
   const headers = new Headers({
     "Content-Type": "text/csv; charset=utf-8",
@@ -89,5 +91,16 @@ function formatExportDate(value: string | null): string {
     return formatInTimeZone(new Date(value), DEFAULT_TIMEZONE, "dd/MM/yyyy HH:mm:ss");
   } catch {
     return value;
+  }
+}
+
+function formatExportWeekday(value: string | null): string {
+  if (!value) return "";
+  try {
+    return formatInTimeZone(new Date(value), DEFAULT_TIMEZONE, "EEEE", {
+      locale: ptBR,
+    });
+  } catch {
+    return "";
   }
 }
